@@ -1,0 +1,6 @@
+{
+  "name": "DeskSpace4K - Ultra HD & 4K Desktop Wallpapers",
+  "description": "Ultra-fast, modern dark-themed 4K desktop wallpaper repository with secret hidden admin dashboard, bulk upload system, visitor authentication, interactive resolution cropper, and full bilingual Arabic & English support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
