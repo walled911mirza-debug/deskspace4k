@@ -14,6 +14,7 @@ import {
   ArrowLeft,
   Smartphone,
   ChevronDown,
+  Film,
 } from 'lucide-react';
 import { Header } from './components/Header';
 import { HeroSection } from './components/HeroSection';
@@ -962,12 +963,85 @@ export default function App() {
           />
 
           {/* Main Desktop Wallpaper Gallery (STRICTLY 16:9 - ALL Mobile Wallpapers Excluded) */}
-          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-5 sm:py-8">
             <div id="wallpaper-gallery-top" ref={galleryTopRef} className="scroll-mt-28" />
+            {/* Mobile/Tablet Horizontal Category Rail */}
+            <div className="lg:hidden mb-4 sm:mb-6 -mx-3 px-3 overflow-x-auto no-scrollbar">
+              <div className="flex items-center gap-2 min-w-max pb-1">
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategory('All')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer touch-manipulation min-h-[36px] flex items-center gap-1.5 ${
+                    selectedCategory === 'All'
+                      ? 'bg-cyan-500 text-black shadow-lg shadow-cyan-500/25 font-bold'
+                      : 'bg-[#15161E] text-neutral-300 border border-[#232535] hover:text-white hover:border-[#34374A]'
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>{t.navAll}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategory('Live')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer touch-manipulation min-h-[36px] flex items-center gap-1.5 ${
+                    selectedCategory === 'Live'
+                      ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-black font-bold shadow-lg shadow-cyan-500/25'
+                      : 'bg-[#15161E] text-cyan-400 border border-cyan-500/30 hover:border-cyan-400'
+                  }`}
+                >
+                  <Film className="w-3.5 h-3.5 animate-pulse" />
+                  <span>{t.navLive}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedCategory('MobileLive');
+                    navigate('/mobile-live');
+                  }}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer touch-manipulation min-h-[36px] flex items-center gap-1.5 bg-[#15161E] text-emerald-400 border border-emerald-500/30 hover:border-emerald-400 hover:bg-emerald-500/10"
+                >
+                  <Smartphone className="w-3.5 h-3.5" />
+                  <span>{lang === 'ar' ? 'خلفيات هاتف' : 'Mobile Live'}</span>
+                </button>
+
+                {(['Anime', 'Gaming', 'Nature', 'Space', 'Cars', 'Minimalist'] as Category[]).map((cat) => {
+                  const isActive = selectedCategory === cat;
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setSelectedCategory(cat)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer touch-manipulation min-h-[36px] ${
+                        isActive
+                          ? 'bg-cyan-500 text-black font-bold shadow-lg shadow-cyan-500/25'
+                          : 'bg-[#15161E] text-neutral-300 border border-[#232535] hover:text-white hover:border-[#34374A]'
+                      }`}
+                    >
+                      {t.categories[cat] || cat}
+                    </button>
+                  );
+                })}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedCategory('Blog');
+                    navigate('/blog');
+                  }}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer touch-manipulation min-h-[36px] flex items-center gap-1.5 bg-[#15161E] text-purple-300 border border-purple-500/30 hover:border-purple-400 hover:bg-purple-500/10"
+                >
+                  <BookOpen className="w-3.5 h-3.5" />
+                  <span>{lang === 'ar' ? 'المقالات' : 'Journal'}</span>
+                </button>
+              </div>
+            </div>
+
             {/* Controls Toolbar: Active category label, result count, and sort pills */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8 pb-4 border-b border-[#20222B]">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 mb-6 sm:mb-8 pb-4 border-b border-[#20222B]">
               <div>
-                <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
+                <h2 className="text-lg sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
                   <span>
                     {selectedCategory === 'All'
                       ? t.navAll
@@ -975,7 +1049,7 @@ export default function App() {
                       ? t.navLive
                       : t.categories[selectedCategory as Category] || selectedCategory}
                   </span>
-                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#181920] border border-[#272935] text-cyan-400 font-mono font-semibold">
+                  <span className="text-[11px] sm:text-xs px-2 sm:px-2.5 py-0.5 rounded-full bg-[#181920] border border-[#272935] text-cyan-400 font-mono font-semibold">
                     {filteredDesktopWallpapers.length}
                   </span>
                 </h2>
@@ -990,55 +1064,55 @@ export default function App() {
                 </p>
               </div>
 
-              {/* Sort Segments */}
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-medium text-neutral-400 hidden sm:inline">
+              {/* Sort Segments - clean horizontal scrolling or fit on small viewports */}
+              <div className="flex items-center justify-between sm:justify-start gap-2 w-full sm:w-auto overflow-x-auto no-scrollbar">
+                <span className="text-xs font-medium text-neutral-400 hidden sm:inline shrink-0">
                   {t.sortBy}:
                 </span>
-                <div className="flex items-center p-1 bg-[#17181F] rounded-xl border border-[#262835] text-xs">
+                <div className="flex items-center p-1 bg-[#17181F] rounded-xl border border-[#262835] text-xs w-full sm:w-auto justify-between sm:justify-start min-w-[270px] sm:min-w-0">
                   <button
                     type="button"
                     onClick={() => setSortBy('popular')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+                    className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-2.5 sm:px-3 py-2 sm:py-1.5 rounded-lg font-medium transition-colors cursor-pointer min-h-[38px] sm:min-h-0 touch-manipulation ${
                       sortBy === 'popular'
                         ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
                         : 'text-neutral-400 hover:text-white'
                     }`}
                   >
-                    <Flame className="w-3.5 h-3.5" />
-                    <span>{t.sortPopular}</span>
+                    <Flame className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">{t.sortPopular}</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setSortBy('latest')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+                    className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-2.5 sm:px-3 py-2 sm:py-1.5 rounded-lg font-medium transition-colors cursor-pointer min-h-[38px] sm:min-h-0 touch-manipulation ${
                       sortBy === 'latest'
                         ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
                         : 'text-neutral-400 hover:text-white'
                     }`}
                   >
-                    <Clock className="w-3.5 h-3.5" />
-                    <span>{t.sortLatest}</span>
+                    <Clock className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">{t.sortLatest}</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setSortBy('favorites')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+                    className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-2.5 sm:px-3 py-2 sm:py-1.5 rounded-lg font-medium transition-colors cursor-pointer min-h-[38px] sm:min-h-0 touch-manipulation ${
                       sortBy === 'favorites'
                         ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
                         : 'text-neutral-400 hover:text-white'
                     }`}
                   >
-                    <Heart className="w-3.5 h-3.5" />
-                    <span>{t.sortFavorites}</span>
+                    <Heart className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">{t.sortFavorites}</span>
                   </button>
                 </div>
               </div>
             </div>
 
-            {/* Desktop Wallpaper Grid */}
+            {/* Desktop Wallpaper Grid - 2 columns on mobile, 3 on lg, 4 on xl */}
             {filteredDesktopWallpapers.length === 0 ? (
               <div className="py-20 text-center rounded-2xl bg-[#14151B] border border-[#232532] p-8 max-w-md mx-auto">
                 <Search className="w-12 h-12 text-neutral-600 mx-auto mb-3" />
@@ -1053,7 +1127,7 @@ export default function App() {
                     setSearchQuery('');
                     setSelectedCategory('All');
                   }}
-                  className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-xs shadow-md transition-colors cursor-pointer"
+                  className="px-4 py-2.5 min-h-[44px] rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-xs shadow-md transition-colors cursor-pointer touch-manipulation"
                 >
                   {t.clearFilters}
                 </button>
@@ -1061,7 +1135,7 @@ export default function App() {
             ) : (
               <>
                 <ErrorBoundary isSection fallbackTitle={lang === 'ar' ? 'معرض خلفيات سطح المكتب' : 'Desktop 4K Wallpaper Gallery'}>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 sm:gap-6">
+                  <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-5 lg:gap-6">
                     {displayedDesktopWallpapers.map((wallpaper) => (
                       <WallpaperCard
                         key={wallpaper.id}

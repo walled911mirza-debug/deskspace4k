@@ -118,6 +118,24 @@ export const translations = {
     resUltraWide: 'Ultrawide (3440×1440)',
     resMobile: 'Mobile 9:16 (1080×1920)',
 
+    // Mobile Live Wallpaper & Instructions
+    mobileLiveOptionsTitle: 'Mobile Live Wallpaper (Live Photo / Video)',
+    mobileLiveDesc: 'Optimized 9:16 vertical motion loop for iPhone Lock Screen Live Photos & Android Video Wallpapers.',
+    downloadForIPhone: 'Download for iPhone (Live Wallpaper)',
+    downloadForAndroid: 'Download for Android (Live Wallpaper)',
+    downloadMobileStill: 'Download Mobile Portrait Still (9:16)',
+    mobileGuideToggle: 'How to set on your phone',
+    mobileGuideIos: 'iPhone (iOS 17+)',
+    mobileGuideAndroid: 'Android (Samsung, Xiaomi, Pixel)',
+    iosStep1: '1. Tap "Download for iPhone" to save the high-res 9:16 video to your Photos library.',
+    iosStep2: '2. Open the Photos app, locate the video, tap the Share button (bottom left), and choose "Use as Wallpaper".',
+    iosStep3: '3. In the Lock Screen customization view, ensure the Live Motion / Play icon (bottom left) is active, then tap "Add" or "Set as Wallpaper Pair".',
+    androidStep1: '1. Tap "Download for Android" to save the MP4 video directly to your Downloads / Gallery.',
+    androidStep2: '2. Open your Gallery app, find the video, tap More options (three dots or "Set as"), and select "Set as wallpaper".',
+    androidStep3: '3. Select "Lock Screen" (Android natively supports looping video wallpapers up to 15 seconds) and tap "Apply".',
+    mobileNotice: 'Direct MP4 loop format · Ready for native iOS & Android lock screens without third-party converters.',
+    detectedDevice: 'Detected Device',
+
     // Visitor Auth Modal
     authTitleSignIn: 'Sign In to DeskSpace4K',
     authTitleSignUp: 'Create Free Visitor Account',
@@ -382,6 +400,24 @@ export const translations = {
     resFHD: 'دقة كاملة Full HD (1920×1080)',
     resUltraWide: 'شاشة عريضة (3440×1440)',
     resMobile: 'الهاتف الذكي 9:16 (1080×1920)',
+
+    // Mobile Live Wallpaper & Instructions
+    mobileLiveOptionsTitle: 'خلفية هاتف حية (Live Photo / فيديو شاشة القفل)',
+    mobileLiveDesc: 'حلقة فيديو عمودية فائقة الدقة 9:16 مجهزة خصيصاً لميزة Live Photo في iPhone وخلفيات الفيديو في Android.',
+    downloadForIPhone: 'تحميل لـ iPhone (خلفية حية iOS)',
+    downloadForAndroid: 'تحميل لـ Android (فيديو شاشة القفل)',
+    downloadMobileStill: 'تحميل صورة هاتف ثابتة (9:16)',
+    mobileGuideToggle: 'طريقة تعيين الخلفية على هاتفك',
+    mobileGuideIos: 'هواتف iPhone (نظام iOS 17 وما بعده)',
+    mobileGuideAndroid: 'هواتف Android (سامسونج، شاومي، بيكسل)',
+    iosStep1: '1. اضغط "تحميل لـ iPhone" لحفظ فيديو الحركة الرأسي مباشرة في تطبيق الصور.',
+    iosStep2: '2. افتح تطبيق الصور (Photos)، اختر الفيديو، اضغط على زر المشاركة ثم "تعيين كخلفية شاشة".',
+    iosStep3: '3. في شاشة تخصيص القفل، تأكد من تفعيل أيقونة الحركة / Live (أسفل اليسار) ثم اضغط "إضافة" أو "تعيين كزوج خلفيات".',
+    androidStep1: '1. اضغط "تحميل لـ Android" لحفظ ملف الفيديو MP4 في معرض الصور أو التنزيلات.',
+    androidStep2: '2. افتح تطبيق المعرض (Gallery)، افتح الفيديو، اضغط على خيارات إضافية (النقاط الثلاث) واختر "تعيين كخلفية".',
+    androidStep3: '3. حدد "شاشة القفل" (يدعم نظام أندرويد تشغيل الفيديو كخلفية حية بشكل أصلي) واضغط "تطبيق".',
+    mobileNotice: 'تنسيق MP4 مباشر عالي التوافق · يعمل على شاشات قفل الهواتف دون الحاجة لأي تطبيقات تحويل خارجية.',
+    detectedDevice: 'الجهاز المكتشف',
 
     // Visitor Auth Modal
     authTitleSignIn: 'تسجيل الدخول إلى ديسك سبيس 4K',

@@ -10,7 +10,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const isProd = process.env.NODE_ENV === 'production';
-const PORT = Number(process.env.PORT) || 3000;
+
+// Port configuration: AI Studio sets PORT=8080 for NGINX and DEFAULT_APP_PORT=3000 for the Node app.
+// Parse CLI --port argument if provided, or use DEFAULT_APP_PORT / 3000 to avoid EADDRINUSE on 8080.
+const portArgIndex = process.argv.indexOf('--port');
+const portFromArg = portArgIndex !== -1 && process.argv[portArgIndex + 1] ? Number(process.argv[portArgIndex + 1]) : null;
+const PORT = portFromArg || (process.env.PORT && process.env.PORT !== '8080' ? Number(process.env.PORT) : null) || Number(process.env.DEFAULT_APP_PORT) || 3000;
 
 // Initialize Gemini SDK with server-side API Key
 const geminiApiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || '';

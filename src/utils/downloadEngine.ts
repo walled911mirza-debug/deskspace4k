@@ -490,3 +490,214 @@ export async function downloadLiveMotionVideo(
     img.src = mediaSource;
   });
 }
+
+export type MobilePlatform = 'ios' | 'android';
+
+export function detectMobilePlatform(): MobilePlatform {
+  if (typeof navigator === 'undefined') return 'ios';
+  const ua = navigator.userAgent || '';
+  if (/iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
+    return 'ios';
+  }
+  if (/Android/.test(ua)) {
+    return 'android';
+  }
+  return 'ios';
+}
+
+/**
+ * Downloads a Live Wallpaper specifically optimized for mobile devices (iPhone Live Photos or Android Live Lockscreen).
+ * 1. If mediaSource is already an MP4/WebM video:
+ *    Downloads the video file directly with clean platform-labeled naming (DeskSpace4K_[Title]_Live_[iOS/Android].mp4).
+ * 2. If mediaSource is an image:
+ *    Renders a vertical 9:16 portrait video loop (1080×1920) at 60 FPS using HTML5 Canvas captureStream and MediaRecorder,
+ *    centered/cropped perfectly for mobile screens.
+ */
+export async function downloadMobileLiveWallpaper(
+  mediaSource: string,
+  category: string,
+  baseFilename: string,
+  platform: MobilePlatform = 'ios',
+  onProgress?: (status: string) => void
+): Promise<void> {
+  const lowerUrl = (mediaSource || '').toLowerCase();
+  const isRealVideo =
+    lowerUrl.startsWith('data:video/') ||
+    /\.(mp4|webm|mov|mkv|avi)($|\?)/i.test(lowerUrl);
+
+  const platformTag = platform === 'ios' ? 'iOS_LivePhoto' : 'Android_Live';
+  const safeBase = `${baseFilename}_${platformTag}`;
+
+  if (isRealVideo) {
+    const ext = detectMediaExtension(mediaSource, 'mp4');
+    return downloadDirectMediaFile(mediaSource, safeBase, ext, onProgress);
+  }
+
+  onProgress?.('preparing_mobile_live');
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+
+    img.onload = () => {
+      try {
+        const width = 1080;
+        const height = 1920;
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+
+        if (!ctx || typeof canvas.captureStream !== 'function' || typeof MediaRecorder === 'undefined') {
+          // Fallback to high-res portrait still download
+          const fallbackJpgName = sanitizeFilename(safeBase, 'jpg');
+          downloadWallpaperWithResolution({
+            imageUrl: mediaSource,
+            filename: fallbackJpgName,
+            targetWidth: 1080,
+            targetHeight: 1920,
+          });
+          resolve();
+          return;
+        }
+
+        // Particle configuration for mobile screen
+        const particles: Array<{
+          x: number;
+          y: number;
+          size: number;
+          speedX: number;
+          speedY: number;
+          alpha: number;
+          color: string;
+        }> = [];
+
+        const colors =
+          category === 'Space'
+            ? ['#A855F7', '#06B6D4', '#E0E7FF']
+            : category === 'Anime'
+            ? ['#F472B6', '#FBCFE8', '#FDE047']
+            : category === 'Gaming'
+            ? ['#00F0FF', '#FF007F', '#A855F7']
+            : ['#00F0FF', '#38BDF8', '#FFFFFF'];
+
+        for (let i = 0; i < 40; i++) {
+          particles.push({
+            x: Math.random() * width,
+            y: Math.random() * height,
+            size: Math.random() * 3 + 1.2,
+            speedX: (Math.random() - 0.5) * 1.2,
+            speedY: Math.random() * 2 + 0.8,
+            alpha: Math.random() * 0.7 + 0.3,
+            color: colors[Math.floor(Math.random() * colors.length)],
+          });
+        }
+
+        // Calculate aspect fill (cover) centering for 9:16 portrait
+        const sourceAspect = img.naturalWidth / img.naturalHeight;
+        const targetAspect = width / height;
+
+        let renderWidth = width;
+        let renderHeight = height;
+        let offsetX = 0;
+        let offsetY = 0;
+
+        if (sourceAspect > targetAspect) {
+          renderHeight = height;
+          renderWidth = height * sourceAspect;
+          offsetX = (width - renderWidth) / 2;
+        } else {
+          renderWidth = width;
+          renderHeight = width / sourceAspect;
+          offsetY = (height - renderHeight) / 2;
+        }
+
+        const stream = canvas.captureStream(60);
+        const mimeType = MediaRecorder.isTypeSupported('video/mp4; codecs="avc1.424028, mp4a.40.2"')
+          ? 'video/mp4'
+          : MediaRecorder.isTypeSupported('video/mp4')
+          ? 'video/mp4'
+          : MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+          ? 'video/webm;codecs=vp9'
+          : 'video/webm';
+
+        const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 10000000 });
+        const chunks: Blob[] = [];
+
+        recorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) chunks.push(e.data);
+        };
+
+        recorder.onstop = () => {
+          const videoBlob = new Blob(chunks, { type: mimeType });
+          const videoUrl = URL.createObjectURL(videoBlob);
+          const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+          const finalFilename = sanitizeFilename(safeBase, ext);
+
+          triggerAnchorDownload(videoUrl, finalFilename);
+          setTimeout(() => URL.revokeObjectURL(videoUrl), 2000);
+
+          onProgress?.('complete');
+          resolve();
+        };
+
+        recorder.start();
+        onProgress?.('recording_motion');
+
+        let frame = 0;
+        const totalFrames = 180; // 3 seconds at 60fps loop
+
+        const drawLoop = () => {
+          // Subtle zoom pulse for live breathing effect
+          const pulse = 1 + Math.sin((frame / totalFrames) * Math.PI * 2) * 0.015;
+          ctx.save();
+          ctx.translate(width / 2, height / 2);
+          ctx.scale(pulse, pulse);
+          ctx.translate(-width / 2, -height / 2);
+
+          ctx.drawImage(img, offsetX, offsetY, renderWidth, renderHeight);
+          ctx.restore();
+
+          // Draw particles
+          particles.forEach((p) => {
+            p.x += p.speedX;
+            p.y += p.speedY;
+            if (p.x < 0) p.x = width;
+            if (p.x > width) p.x = 0;
+            if (p.y > height) p.y = 0;
+
+            ctx.save();
+            ctx.globalAlpha = p.alpha;
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          });
+
+          frame++;
+          if (frame < totalFrames) {
+            requestAnimationFrame(drawLoop);
+          } else {
+            recorder.stop();
+          }
+        };
+
+        drawLoop();
+      } catch (err) {
+        console.warn('Mobile video recording error, using fallback still:', err);
+        const fallbackJpgName = sanitizeFilename(safeBase, 'jpg');
+        fallbackDirectDownload(mediaSource, fallbackJpgName);
+        resolve();
+      }
+    };
+
+    img.onerror = () => {
+      const fallbackJpgName = sanitizeFilename(safeBase, 'jpg');
+      fallbackDirectDownload(mediaSource, fallbackJpgName);
+      resolve();
+    };
+
+    img.src = mediaSource;
+  });
+}

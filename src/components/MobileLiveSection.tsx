@@ -353,7 +353,7 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
             isSection
             fallbackTitle={lang === 'ar' ? 'معرض خلفيات الهاتف' : 'Mobile Live Wallpapers Grid'}
           >
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 lg:gap-5">
               {displayedWallpapers.map((wallpaper) => (
                 <WallpaperCard
                   key={wallpaper.id}

@@ -60,7 +60,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
           <button
             type="button"
             onClick={onClearFilters}
-            className={`px-5 py-2.5 rounded-xl font-bold text-xs shadow-lg transition-all cursor-pointer transform hover:scale-105 active:scale-95 ${
+            className={`min-h-[44px] px-5 py-2.5 rounded-xl font-bold text-xs shadow-lg transition-all cursor-pointer transform hover:scale-105 active:scale-95 touch-manipulation ${
               isMobile
                 ? 'bg-gradient-to-r from-purple-600 to-fuchsia-600 hover:from-purple-500 hover:to-fuchsia-500 text-white shadow-fuchsia-500/20'
                 : 'bg-cyan-500 hover:bg-cyan-400 text-black shadow-cyan-500/20'

@@ -71,56 +71,56 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
   };
 
   return (
-    <section className="relative overflow-hidden py-12 sm:py-16 md:py-20 px-4 sm:px-6 lg:px-8 border-b border-[#1E202B] bg-gradient-to-b from-[#13141A] via-[#101012] to-[#101010]">
+    <section className="relative overflow-hidden py-8 sm:py-16 md:py-20 px-3 sm:px-6 lg:px-8 border-b border-[#1E202B] bg-gradient-to-b from-[#13141A] via-[#101012] to-[#101010]">
       {/* Subtle ambient neon glow elements */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[550px] h-[320px] bg-gradient-to-tr from-cyan-500/10 via-purple-600/10 to-pink-500/5 blur-[120px] rounded-full pointer-events-none" />
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[320px] sm:w-[550px] h-[220px] sm:h-[320px] bg-gradient-to-tr from-cyan-500/10 via-purple-600/10 to-pink-500/5 blur-[100px] sm:blur-[120px] rounded-full pointer-events-none" />
 
       <div className="relative max-w-4xl mx-auto text-center">
         {/* Subtle top indicator & blog highlight */}
-        <div className="flex flex-wrap items-center justify-center gap-2 mb-6">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#181A22] border border-[#272B3C] text-neutral-300 text-xs shadow-sm">
-            <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="font-semibold text-white">4K UHD Resolution</span>
+        <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 mb-4 sm:mb-6">
+          <div className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 rounded-full bg-[#181A22] border border-[#272B3C] text-neutral-300 text-[11px] sm:text-xs shadow-sm">
+            <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+            <span className="font-semibold text-white">4K UHD</span>
             <span className="text-neutral-500">·</span>
-            <span className="text-neutral-400">3840 × 2160 Pixels</span>
+            <span className="text-neutral-400">3840×2160</span>
           </div>
 
           {onOpenBlog && (
             <button
               onClick={onOpenBlog}
-              className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#1A1C26] hover:bg-[#222534] border border-cyan-500/30 hover:border-cyan-500/60 text-xs text-neutral-300 hover:text-white transition-all cursor-pointer shadow-sm group"
+              className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 rounded-full bg-[#1A1C26] hover:bg-[#222534] border border-cyan-500/30 hover:border-cyan-500/60 text-[11px] sm:text-xs text-neutral-300 hover:text-white transition-all cursor-pointer shadow-sm group touch-manipulation active:scale-95"
             >
-              <BookOpen className="w-3.5 h-3.5 text-cyan-400" />
+              <BookOpen className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
               <span className="font-semibold text-cyan-300">
-                {lang === 'ar' ? 'المدونة التقنية' : 'DeskSpace Journal'}
+                {lang === 'ar' ? 'المدونة' : 'Journal'}
               </span>
-              <span className="text-neutral-500">·</span>
-              <span className="text-neutral-400 group-hover:text-white">
+              <span className="text-neutral-500 hidden sm:inline">·</span>
+              <span className="text-neutral-400 group-hover:text-white hidden sm:inline truncate max-w-[200px]">
                 {lang === 'ar' ? 'علم شاشات 4K و OLED' : 'OLED & 4K Display Optics'}
               </span>
               {lang === 'ar' ? (
-                <ArrowLeft className="w-3 h-3 text-cyan-400 group-hover:-translate-x-0.5 transition-transform" />
+                <ArrowLeft className="w-3 h-3 text-cyan-400 group-hover:-translate-x-0.5 transition-transform shrink-0" />
               ) : (
-                <ArrowRight className="w-3 h-3 text-cyan-400 group-hover:translate-x-0.5 transition-transform" />
+                <ArrowRight className="w-3 h-3 text-cyan-400 group-hover:translate-x-0.5 transition-transform shrink-0" />
               )}
             </button>
           )}
         </div>
 
         {/* Hero Title */}
-        <h1 className="text-3xl sm:text-5xl md:text-6xl font-black text-white tracking-tight leading-[1.1] mb-4 text-balance">
+        <h1 className="text-2xl sm:text-4xl md:text-5xl lg:text-6xl font-black text-white tracking-tight leading-[1.15] mb-3 sm:mb-4 text-balance break-words px-1">
           {t.brandTagline}
         </h1>
 
         {/* Subtitle */}
-        <p className="text-sm sm:text-base md:text-lg text-neutral-400 max-w-2xl mx-auto mb-8 font-normal leading-relaxed">
+        <p className="text-xs sm:text-base md:text-lg text-neutral-400 max-w-2xl mx-auto mb-6 sm:mb-8 font-normal leading-relaxed px-2">
           {t.brandSubtitle}
         </p>
 
         {/* Large Central Search Input with Recent Searches Dropdown */}
-        <div ref={containerRef} className="relative max-w-2xl mx-auto mb-6 text-left">
+        <div ref={containerRef} className="relative max-w-2xl mx-auto mb-5 sm:mb-6 text-left">
           <div className="relative flex items-center rounded-2xl bg-[#16171E] border border-[#2B2F42] hover:border-cyan-500/50 focus-within:border-cyan-500 shadow-2xl transition-all">
-            <Search className="w-5 h-5 absolute left-4 text-neutral-500 pointer-events-none" />
+            <Search className="w-4 sm:w-5 h-4 sm:h-5 absolute left-3.5 sm:left-4 text-neutral-500 pointer-events-none" />
             <input
               type="text"
               value={searchQuery}
@@ -131,13 +131,13 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
               }}
               onKeyDown={handleKeyDown}
               placeholder={t.searchPlaceholder}
-              className="w-full pl-12 pr-12 py-3.5 sm:py-4 text-sm rounded-2xl bg-transparent text-white placeholder:text-neutral-500 focus:outline-none"
+              className="w-full pl-10 sm:pl-12 pr-12 py-3 sm:py-3.5 md:py-4 text-xs sm:text-sm rounded-2xl bg-transparent text-white placeholder:text-neutral-500 focus:outline-none"
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => onSearchChange('')}
-                className="absolute right-4 px-2 py-1 text-xs rounded-md bg-[#232738] text-neutral-400 hover:text-white transition-colors cursor-pointer"
+                className="absolute right-3 px-2 py-1 text-xs rounded-md bg-[#232738] text-neutral-400 hover:text-white transition-colors cursor-pointer min-h-[32px] flex items-center justify-center touch-manipulation"
               >
                 Clear
               </button>
@@ -223,39 +223,45 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
         </div>
 
         {/* Popular Tags */}
-        <div className="flex flex-wrap items-center justify-center gap-2 text-xs">
-          <span className="text-neutral-500 font-medium">{t.popularTags}</span>
-          {POPULAR_TAGS.map((tag) => (
-            <button
-              key={tag}
-              onClick={() => {
-                onSelectTag(tag);
-                addSearch(tag);
-              }}
-              className="px-2.5 py-1 rounded-lg bg-[#181A24] hover:bg-[#222533] border border-[#272A3B] text-neutral-300 hover:text-cyan-400 text-xs transition-colors cursor-pointer"
-            >
-              #{tag}
-            </button>
-          ))}
+        <div className="w-full max-w-full overflow-hidden mt-1">
+          <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar sm:flex-wrap sm:justify-center py-1.5 px-2 -mx-2 touch-manipulation">
+            <span className="text-neutral-400 font-semibold text-[11px] sm:text-xs shrink-0 whitespace-nowrap flex items-center gap-1">
+              <Sparkles className="w-3 h-3 text-cyan-400 shrink-0" />
+              <span>{t.popularTags}</span>
+            </span>
+            {POPULAR_TAGS.map((tag) => (
+              <button
+                key={tag}
+                type="button"
+                onClick={() => {
+                  onSelectTag(tag);
+                  addSearch(tag);
+                }}
+                className="min-h-[36px] sm:min-h-[32px] px-3 py-1.5 rounded-xl bg-[#181A24] hover:bg-[#222533] border border-[#272A3B] hover:border-cyan-500/40 text-neutral-300 hover:text-cyan-300 text-xs font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 touch-manipulation active:scale-95"
+              >
+                #{tag}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Trust & Spec Markers */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-2xl mx-auto mt-10 pt-6 border-t border-[#1E202C] text-xs text-neutral-400">
-          <div className="flex items-center justify-center gap-1.5">
-            <Monitor className="w-4 h-4 text-cyan-400" />
-            <span>3840×2160 UHD</span>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 max-w-2xl mx-auto mt-6 sm:mt-10 pt-4 sm:pt-6 border-t border-[#1E202C] text-[11px] sm:text-xs text-neutral-400">
+          <div className="flex items-center justify-center gap-1.5 p-1.5 rounded-lg bg-[#14151D]/60 sm:bg-transparent">
+            <Monitor className="w-3.5 sm:w-4 h-3.5 sm:h-4 text-cyan-400 shrink-0" />
+            <span className="truncate">3840×2160 UHD</span>
           </div>
-          <div className="flex items-center justify-center gap-1.5">
-            <Sparkles className="w-4 h-4 text-rose-400" />
-            <span>{lang === 'ar' ? 'حركة حية 60 FPS' : 'Live Motion 60 FPS'}</span>
+          <div className="flex items-center justify-center gap-1.5 p-1.5 rounded-lg bg-[#14151D]/60 sm:bg-transparent">
+            <Sparkles className="w-3.5 sm:w-4 h-3.5 sm:h-4 text-rose-400 shrink-0" />
+            <span className="truncate">{lang === 'ar' ? 'حركة حية 60 FPS' : 'Live 60 FPS'}</span>
           </div>
-          <div className="flex items-center justify-center gap-1.5">
-            <Download className="w-4 h-4 text-emerald-400" />
-            <span>MP4 &amp; 4K JPG</span>
+          <div className="flex items-center justify-center gap-1.5 p-1.5 rounded-lg bg-[#14151D]/60 sm:bg-transparent">
+            <Download className="w-3.5 sm:w-4 h-3.5 sm:h-4 text-emerald-400 shrink-0" />
+            <span className="truncate">MP4 &amp; 4K JPG</span>
           </div>
-          <div className="flex items-center justify-center gap-1.5">
-            <ShieldCheck className="w-4 h-4 text-purple-400" />
-            <span>No Watermarks</span>
+          <div className="flex items-center justify-center gap-1.5 p-1.5 rounded-lg bg-[#14151D]/60 sm:bg-transparent">
+            <ShieldCheck className="w-3.5 sm:w-4 h-3.5 sm:h-4 text-purple-400 shrink-0" />
+            <span className="truncate">No Watermarks</span>
           </div>
         </div>
       </div>

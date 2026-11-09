@@ -27,6 +27,8 @@ import {
   ChevronDown,
   Film,
   Image as ImageIcon,
+  HelpCircle,
+  Apple,
 } from 'lucide-react';
 import { Wallpaper, Category, Language } from '../types';
 import { translations } from '../translations';
@@ -37,6 +39,9 @@ import {
   detectMediaExtension,
   sanitizeFilename,
   fallbackDirectDownload,
+  downloadMobileLiveWallpaper,
+  detectMobilePlatform,
+  MobilePlatform,
 } from '../utils/downloadEngine';
 import {
   getOptimizedPreviewUrl,
@@ -154,6 +159,9 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
   const [isResDropdownOpen, setIsResDropdownOpen] = useState(false);
   const [downloadingType, setDownloadingType] = useState<'video' | 'photo' | null>(null);
   const [downloadSuccessType, setDownloadSuccessType] = useState<'video' | 'photo' | null>(null);
+  const [downloadingMobile, setDownloadingMobile] = useState<MobilePlatform | null>(null);
+  const [mobilePlatform, setMobilePlatform] = useState<MobilePlatform>(() => detectMobilePlatform());
+  const [isMobileGuideOpen, setIsMobileGuideOpen] = useState(false);
   const [isZoomed, setIsZoomed] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
 
@@ -200,6 +208,7 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
     setIsZoomed(false);
     setDownloadingType(null);
     setDownloadSuccessType(null);
+    setDownloadingMobile(null);
     setIsResDropdownOpen(false);
     setSelectedResId('4k');
     setIsPlaying(true);
@@ -555,6 +564,35 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
     }
   };
 
+  // 3. Mobile Live Wallpaper Download Handler (iPhone Live Photos & Android Video Wallpapers)
+  const handleDownloadMobileLive = async (targetPlatform: MobilePlatform) => {
+    if (!wallpaper || downloadingMobile || downloadingType) return;
+    setDownloadingMobile(targetPlatform);
+
+    try {
+      const safeTitle = currentTitle.replace(/[^a-zA-Z0-9_\-\u0600-\u06FF]/g, '_').slice(0, 32) || 'Wallpaper';
+      const baseFilename = `DeskSpace4K_${safeTitle}`;
+      const videoSrc = videoSource || wallpaper.videoUrl || (isVideoUrl(wallpaper.url) ? wallpaper.url : null);
+      const mediaSource = videoSrc || wallpaper.posterUrl || previewImgUrl || wallpaper.url;
+
+      await downloadMobileLiveWallpaper(
+        mediaSource,
+        wallpaper.category,
+        baseFilename,
+        targetPlatform
+      );
+
+      const label = targetPlatform === 'ios' ? 'iPhone Live Photo (MP4)' : 'Android Live Wallpaper (MP4)';
+      onRecordDownload(wallpaper, label);
+      setDownloadSuccessType('video');
+      setTimeout(() => setDownloadSuccessType(null), 4500);
+    } catch (err) {
+      console.error('Mobile Live download error:', err);
+    } finally {
+      setDownloadingMobile(null);
+    }
+  };
+
   // Copy Link Handler
   const handleCopyLink = () => {
     if (!wallpaper) return;
@@ -902,19 +940,19 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
           {/* Right / Bottom: Download CTA & Actions */}
           <div className="flex flex-col gap-3 shrink-0 w-full lg:w-auto">
             {/* Download buttons bar layout using Flexbox with gap: 12px (gap-3) and vertical alignment items-center */}
-            <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-3">
+            <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2.5 sm:gap-3 w-full">
               {/* Quality Resolution Selector Dropdown */}
-              <div ref={resDropdownRef} className="relative min-w-[210px] flex-shrink-0">
+              <div ref={resDropdownRef} className="relative w-full sm:w-auto min-w-0 sm:min-w-[210px] flex-shrink-0">
                 <button
                   type="button"
                   onClick={() => setIsResDropdownOpen(!isResDropdownOpen)}
-                  className="w-full px-4 py-3 rounded-2xl bg-[#1B1D28] hover:bg-[#222534] border border-[#2E3348] text-neutral-200 text-xs font-semibold flex items-center justify-between gap-3 cursor-pointer transition-colors shadow-sm"
+                  className="w-full min-h-[46px] px-3.5 sm:px-4 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl bg-[#1B1D28] hover:bg-[#222534] border border-[#2E3348] text-neutral-200 text-xs font-semibold flex items-center justify-between gap-3 cursor-pointer transition-colors shadow-sm touch-manipulation"
                 >
-                  <div className="flex items-center gap-2.5 text-left">
+                  <div className="flex items-center gap-2.5 text-left min-w-0">
                     <Monitor className="w-4 h-4 text-cyan-400 shrink-0" />
-                    <div>
-                      <div className="font-bold text-white leading-tight">{selectedRes.name[lang]}</div>
-                      <div className="text-[10px] text-neutral-400 font-mono mt-0.5">
+                    <div className="min-w-0 truncate">
+                      <div className="font-bold text-white leading-tight truncate">{selectedRes.name[lang]}</div>
+                      <div className="text-[10px] text-neutral-400 font-mono mt-0.5 truncate">
                         {selectedRes.width} × {selectedRes.height} · {selectedRes.aspectRatio}
                       </div>
                     </div>
@@ -923,7 +961,7 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
                 </button>
 
                 {isResDropdownOpen && (
-                  <div className="absolute right-0 sm:left-auto top-full mt-2 w-72 rounded-2xl bg-[#171822]/95 backdrop-blur-xl border border-[#2C3044] shadow-2xl p-2 z-50 space-y-1">
+                  <div className="absolute right-0 sm:left-auto top-full mt-2 w-full sm:w-72 max-w-[calc(100vw-32px)] rounded-2xl bg-[#171822]/98 backdrop-blur-xl border border-[#2C3044] shadow-2xl p-2 z-50 space-y-1">
                     <div className="px-3 py-1.5 text-[10px] uppercase font-bold text-neutral-400 tracking-wider">
                       {lang === 'ar' ? 'اختر دقة الشاشة المناسبة' : 'Select Target Resolution'}
                     </div>
@@ -934,7 +972,7 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
                           setSelectedResId(opt.id);
                           setIsResDropdownOpen(false);
                         }}
-                        className={`w-full p-2.5 rounded-xl text-left text-xs flex items-center justify-between transition-colors cursor-pointer ${
+                        className={`w-full min-h-[44px] p-2.5 rounded-xl text-left text-xs flex items-center justify-between transition-colors cursor-pointer touch-manipulation ${
                           selectedResId === opt.id
                             ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-semibold'
                             : 'hover:bg-[#202230] text-neutral-300'
@@ -959,20 +997,20 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
 
               {isLiveMedia ? (
                 <>
-                  {/* Button 1: Download 4K Motion Video (MP4) - Vibrant Pink/Neon */}
+                  {/* Button 1: Download 4K Motion Video (MP4) */}
                   <button
                     onClick={handleDownloadMotionVideo}
                     disabled={Boolean(downloadingType)}
-                    className="py-3 px-5 rounded-2xl bg-gradient-to-r from-rose-500 via-pink-500 to-fuchsia-600 hover:from-rose-400 hover:via-pink-400 hover:to-fuchsia-500 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2.5 cursor-pointer shadow-lg shadow-rose-500/25 transition-all transform active:scale-95 disabled:opacity-50 whitespace-nowrap min-w-[200px] flex-1 sm:flex-initial"
+                    className="w-full sm:w-auto min-h-[46px] sm:min-h-[48px] py-3 px-4 sm:px-5 rounded-xl sm:rounded-2xl bg-gradient-to-r from-rose-500 via-pink-500 to-fuchsia-600 hover:from-rose-400 hover:via-pink-400 hover:to-fuchsia-500 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-rose-500/25 transition-all transform active:scale-[0.98] disabled:opacity-50 flex-1 touch-manipulation"
                   >
                     {downloadingType === 'video' ? (
-                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin shrink-0" />
                     ) : downloadSuccessType === 'video' ? (
-                      <Check className="w-4 h-4 text-white" />
+                      <Check className="w-4 h-4 text-white shrink-0" />
                     ) : (
-                      <Film className="w-4 h-4 fill-white/20" />
+                      <Film className="w-4 h-4 fill-white/20 shrink-0" />
                     )}
-                    <span>
+                    <span className="truncate">
                       {downloadingType === 'video'
                         ? lang === 'ar'
                           ? 'جاري تجهيز الفيديو...'
@@ -982,25 +1020,25 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
                           ? 'تم تحميل الفيديو!'
                           : 'Video Downloaded!'
                         : lang === 'ar'
-                        ? 'تحميل فيديو متحرك 4K (MP4)'
-                        : 'Download 4K Motion Video (MP4)'}
+                        ? 'تحميل فيديو 4K (MP4)'
+                        : 'Download 4K Video (MP4)'}
                     </span>
                   </button>
 
-                  {/* Button 2: Download 4K Still Photo (3840x2160) - Vibrant Cyan/Blue */}
+                  {/* Button 2: Download 4K Still Photo */}
                   <button
                     onClick={handleDownloadStillPhoto}
                     disabled={Boolean(downloadingType)}
-                    className="py-3 px-5 rounded-2xl bg-gradient-to-r from-cyan-500 via-cyan-400 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-black font-black text-xs sm:text-sm flex items-center justify-center gap-2.5 cursor-pointer shadow-lg shadow-cyan-500/25 transition-all transform active:scale-95 disabled:opacity-50 whitespace-nowrap min-w-[200px] flex-1 sm:flex-initial"
+                    className="w-full sm:w-auto min-h-[46px] sm:min-h-[48px] py-3 px-4 sm:px-5 rounded-xl sm:rounded-2xl bg-gradient-to-r from-cyan-500 via-cyan-400 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-black font-black text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-cyan-500/25 transition-all transform active:scale-[0.98] disabled:opacity-50 flex-1 touch-manipulation"
                   >
                     {downloadingType === 'photo' ? (
-                      <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+                      <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin shrink-0" />
                     ) : downloadSuccessType === 'photo' ? (
-                      <Check className="w-4 h-4 text-black" />
+                      <Check className="w-4 h-4 text-black shrink-0" />
                     ) : (
-                      <ImageIcon className="w-4 h-4 stroke-[2.3]" />
+                      <ImageIcon className="w-4 h-4 stroke-[2.3] shrink-0" />
                     )}
-                    <span>
+                    <span className="truncate">
                       {downloadingType === 'photo'
                         ? lang === 'ar'
                           ? 'جاري تجهيز الصورة...'
@@ -1010,8 +1048,8 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
                           ? 'تم تحميل الصورة!'
                           : 'Photo Downloaded!'
                         : lang === 'ar'
-                        ? `تحميل صورة ثابتة (${resolutionBadge})`
-                        : `Download Still Photo (${resolutionBadge})`}
+                        ? `تحميل صورة (${resolutionBadge})`
+                        : `Download Photo (${resolutionBadge})`}
                     </span>
                   </button>
                 </>
@@ -1020,16 +1058,16 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
                 <button
                   onClick={handleDownloadStillPhoto}
                   disabled={Boolean(downloadingType)}
-                  className="py-3 px-6 rounded-2xl bg-gradient-to-r from-cyan-500 via-cyan-400 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-black font-black text-xs sm:text-sm flex items-center justify-center gap-2.5 cursor-pointer shadow-lg shadow-cyan-500/25 transition-all transform active:scale-95 disabled:opacity-50 whitespace-nowrap min-w-[190px] flex-1 sm:flex-initial"
+                  className="w-full sm:w-auto min-h-[46px] sm:min-h-[48px] py-3 px-4 sm:px-6 rounded-xl sm:rounded-2xl bg-gradient-to-r from-cyan-500 via-cyan-400 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-black font-black text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-cyan-500/25 transition-all transform active:scale-[0.98] disabled:opacity-50 flex-1 touch-manipulation"
                 >
                   {downloadingType === 'photo' ? (
-                    <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+                    <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin shrink-0" />
                   ) : downloadSuccessType === 'photo' ? (
-                    <Check className="w-4 h-4 text-black" />
+                    <Check className="w-4 h-4 text-black shrink-0" />
                   ) : (
-                    <Download className="w-4 h-4 stroke-[2.5]" />
+                    <Download className="w-4 h-4 stroke-[2.5] shrink-0" />
                   )}
-                  <span>
+                  <span className="truncate">
                     {downloadingType === 'photo'
                       ? lang === 'ar'
                         ? 'جاري التحميل...'
@@ -1046,10 +1084,10 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
               )}
 
               {/* Favorite & Share Buttons */}
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto">
                 <button
                   onClick={() => onToggleFavorite(wallpaper.id)}
-                  className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  className={`flex-1 sm:flex-none min-h-[46px] min-w-[46px] p-3 rounded-xl sm:rounded-2xl border transition-all cursor-pointer flex items-center justify-center gap-1.5 touch-manipulation active:scale-[0.98] ${
                     isFavorited
                       ? 'bg-rose-500/20 border-rose-500/40 text-rose-400 shadow-md shadow-rose-500/20'
                       : 'bg-[#1B1D28] hover:bg-[#222534] border-[#2E3348] text-neutral-300 hover:text-white'
@@ -1062,7 +1100,7 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
 
                 <button
                   onClick={handleCopyLink}
-                  className="p-3 rounded-2xl bg-[#1B1D28] hover:bg-[#222534] border border-[#2E3348] text-neutral-300 hover:text-white transition-colors cursor-pointer"
+                  className="flex-1 sm:flex-none min-h-[46px] min-w-[46px] p-3 rounded-xl sm:rounded-2xl bg-[#1B1D28] hover:bg-[#222534] border border-[#2E3348] text-neutral-300 hover:text-white transition-colors cursor-pointer flex items-center justify-center touch-manipulation active:scale-[0.98]"
                   title="Copy Share Link"
                 >
                   {copiedLink ? <Check className="w-4 h-4 text-green-400" /> : <Share2 className="w-4 h-4" />}
@@ -1081,6 +1119,135 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
                 </span>
               </div>
             )}
+
+            {/* Dedicated Mobile Live Wallpaper / Live Photo Feature Box */}
+            <div className="mt-2 p-3 sm:p-4 rounded-2xl bg-gradient-to-b from-[#161824] to-[#101118] border border-cyan-500/30 space-y-3 shadow-lg">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-cyan-500/15 text-cyan-400 border border-cyan-500/25">
+                    <Smartphone className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-white tracking-wide">
+                      {t.mobileLiveOptionsTitle}
+                    </h4>
+                    <p className="text-[10px] text-neutral-400">
+                      {t.mobileLiveDesc}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Device Platform Tabs */}
+                <div className="flex items-center gap-1 bg-[#0D0E13] p-1 rounded-xl border border-[#262838]">
+                  <button
+                    type="button"
+                    onClick={() => setMobilePlatform('ios')}
+                    className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer touch-manipulation active:scale-95 ${
+                      mobilePlatform === 'ios'
+                        ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-black shadow-md'
+                        : 'text-neutral-400 hover:text-white'
+                    }`}
+                  >
+                    <Apple className="w-3.5 h-3.5" />
+                    <span>iPhone</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setMobilePlatform('android')}
+                    className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer touch-manipulation active:scale-95 ${
+                      mobilePlatform === 'android'
+                        ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-black shadow-md'
+                        : 'text-neutral-400 hover:text-white'
+                    }`}
+                  >
+                    <Smartphone className="w-3.5 h-3.5" />
+                    <span>Android</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Direct Mobile Live Download CTA Button */}
+              <button
+                type="button"
+                onClick={() => handleDownloadMobileLive(mobilePlatform)}
+                disabled={Boolean(downloadingMobile) || Boolean(downloadingType)}
+                className={`w-full flex items-center justify-center gap-2 min-h-[46px] py-2.5 px-4 rounded-xl font-bold text-xs sm:text-sm text-white shadow-lg transition-all touch-manipulation active:scale-[0.98] disabled:opacity-60 cursor-pointer ${
+                  mobilePlatform === 'ios'
+                    ? 'bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 shadow-cyan-500/25'
+                    : 'bg-gradient-to-r from-emerald-500 via-teal-600 to-cyan-600 hover:from-emerald-400 hover:to-cyan-500 shadow-emerald-500/25'
+                }`}
+              >
+                {downloadingMobile === mobilePlatform ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin shrink-0" />
+                    <span>{lang === 'ar' ? 'جاري تجهيز فيديو الهاتف 9:16...' : 'Generating 9:16 Mobile Loop...'}</span>
+                  </>
+                ) : (
+                  <>
+                    <Film className="w-4 h-4 shrink-0" />
+                    <span className="truncate">
+                      {mobilePlatform === 'ios' ? t.downloadForIPhone : t.downloadForAndroid}
+                    </span>
+                  </>
+                )}
+              </button>
+
+              {/* Step-by-Step Instructions Toggle Accordion */}
+              <div className="pt-0.5 border-t border-[#1F2232]">
+                <button
+                  type="button"
+                  onClick={() => setIsMobileGuideOpen(!isMobileGuideOpen)}
+                  className="w-full flex items-center justify-between text-[11px] text-neutral-300 hover:text-cyan-300 transition-colors py-1 cursor-pointer touch-manipulation"
+                >
+                  <span className="flex items-center gap-1.5 font-semibold">
+                    <HelpCircle className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                    <span>{t.mobileGuideToggle}</span>
+                  </span>
+                  <ChevronDown
+                    className={`w-3.5 h-3.5 text-neutral-400 transition-transform duration-200 shrink-0 ${
+                      isMobileGuideOpen ? 'rotate-180 text-cyan-400' : ''
+                    }`}
+                  />
+                </button>
+
+                {isMobileGuideOpen && (
+                  <div className="mt-2 p-3 rounded-xl bg-[#0D0E14] border border-[#212435] text-[11px] space-y-2 text-neutral-300 animate-fade-in">
+                    <div className="font-bold text-cyan-400 text-xs flex items-center gap-1.5">
+                      {mobilePlatform === 'ios' ? (
+                        <>
+                          <Apple className="w-3.5 h-3.5 shrink-0" />
+                          <span>{t.mobileGuideIos}</span>
+                        </>
+                      ) : (
+                        <>
+                          <Smartphone className="w-3.5 h-3.5 shrink-0" />
+                          <span>{t.mobileGuideAndroid}</span>
+                        </>
+                      )}
+                    </div>
+
+                    {mobilePlatform === 'ios' ? (
+                      <div className="space-y-1.5 text-neutral-300 leading-snug">
+                        <p>{t.iosStep1}</p>
+                        <p>{t.iosStep2}</p>
+                        <p>{t.iosStep3}</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5 text-neutral-300 leading-snug">
+                        <p>{t.androidStep1}</p>
+                        <p>{t.androidStep2}</p>
+                        <p>{t.androidStep3}</p>
+                      </div>
+                    )}
+
+                    <div className="pt-1.5 text-[10px] text-neutral-400 border-t border-[#1C1E2B] leading-tight">
+                      {t.mobileNotice}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1214,7 +1381,7 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
             </button>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5">
             {relatedWallpapers.map((rel) => {
               const relTitle = cleanWallpaperTitle(rel.title[lang] || rel.title.en);
               const relRes = extractResolutionFromTitle(rel.title[lang] || rel.title.en) || (rel.resolution ? rel.resolution.replace(/\s*[xX]\s*/g, '×').trim() : (isCurrentMobile ? '2160×3840' : '3840×2160'));
@@ -1228,7 +1395,7 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
                 <div
                   key={rel.id}
                   onClick={() => onSelectWallpaper(rel)}
-                  className="group rounded-2xl bg-[#15161E] border border-[#222432] hover:border-cyan-500/50 overflow-hidden shadow-lg transition-all duration-300 cursor-pointer flex flex-col justify-between transform-gpu will-change-transform [transform:translate3d(0,0,0)]"
+                  className="group rounded-xl sm:rounded-2xl bg-[#15161E] border border-[#222432] hover:border-cyan-500/50 overflow-hidden shadow-lg transition-all duration-300 cursor-pointer flex flex-col justify-between transform-gpu will-change-transform [transform:translate3d(0,0,0)] touch-manipulation active:scale-[0.98]"
                 >
                   <div className={`relative ${isCurrentMobile ? 'aspect-[9/16]' : 'aspect-video'} w-full overflow-hidden bg-black/40`}>
                     <img

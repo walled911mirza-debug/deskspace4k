@@ -94,18 +94,18 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="sticky top-0 z-40 w-full bg-[#0E0F14]/95 backdrop-blur-2xl border-b border-[#1E202B] shadow-xl">
       {/* ========================================================= */}
       {/* TOP BAR: Brand Logo, Main Search Bar, Action Controls      */}
-      {/* Guaranteed flex-nowrap to ensure NO clipped critical items */}
+      {/* Responsive flex wrapping with zero horizontal clipping    */}
       {/* ========================================================= */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3 sm:gap-4 flex-nowrap">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 min-h-[56px] sm:min-h-[64px] flex items-center justify-between gap-2 sm:gap-4 flex-wrap sm:flex-nowrap py-1 sm:py-0">
         {/* Left: Brand Logo */}
-        <div className="flex items-center shrink-0">
+        <div className="flex items-center shrink-0 min-w-0">
           <button
             type="button"
             onClick={() => handleCategoryClick('All')}
-            className="flex items-center text-left hover:opacity-90 transition-opacity cursor-pointer"
+            className="flex items-center text-left hover:opacity-90 transition-opacity cursor-pointer touch-manipulation"
             aria-label="DeskSpace4K Home"
           >
-            <DeskSpaceLogo size={36} showText={true} />
+            <DeskSpaceLogo size={28} showText={true} />
           </button>
         </div>
 
@@ -138,7 +138,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={() => onSearchChange('')}
-              className="absolute right-2.5 top-2.5 text-neutral-500 hover:text-white text-xs cursor-pointer"
+              className="absolute right-2.5 top-2.5 text-neutral-500 hover:text-white text-xs cursor-pointer p-1"
             >
               ✕
             </button>
@@ -200,12 +200,12 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Right Action Controls: Search Icon, Favorites, Auth, Language, Menu */}
-        <div className="flex items-center gap-2 sm:gap-2.5 shrink-0 flex-nowrap">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-wrap sm:flex-nowrap justify-end">
           {/* Mobile search toggle button (visible only on < md) */}
           <button
             type="button"
             onClick={() => setShowSearchInput(!showSearchInput)}
-            className="md:hidden p-2 rounded-xl bg-[#151722] border border-[#252838] text-neutral-400 hover:text-white transition-colors cursor-pointer"
+            className="md:hidden min-h-[40px] min-w-[40px] p-2 rounded-xl bg-[#151722] border border-[#252838] text-neutral-400 hover:text-white transition-colors cursor-pointer flex items-center justify-center touch-manipulation active:scale-95"
             aria-label="Toggle Search"
             title="Search Wallpapers"
           >
@@ -216,7 +216,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={onOpenFavorites}
-            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-xl bg-[#151722] hover:bg-[#1E2130] border border-[#252838] hover:border-rose-500/40 text-neutral-300 hover:text-white transition-all cursor-pointer shrink-0"
+            className="flex items-center justify-center gap-1.5 min-h-[40px] min-w-[40px] px-2.5 sm:px-3 py-2 rounded-xl bg-[#151722] hover:bg-[#1E2130] border border-[#252838] hover:border-rose-500/40 text-neutral-300 hover:text-white transition-all cursor-pointer shrink-0 touch-manipulation active:scale-95"
             title={t.navFavorites}
           >
             <Heart
@@ -234,48 +234,50 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </button>
 
-          {/* User Profile / Sign In Button */}
-          {currentUser ? (
-            <button
-              type="button"
-              onClick={onOpenProfileModal}
-              className="flex items-center gap-2 py-1.5 px-2.5 sm:px-3 rounded-xl bg-[#151722] hover:bg-[#1E2130] border border-[#272B3C] text-white transition-colors cursor-pointer shrink-0"
-              title={currentUser.username}
-            >
-              <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-cyan-500 to-purple-600 flex items-center justify-center text-xs font-black text-black uppercase shrink-0">
-                {currentUser.username.slice(0, 1)}
-              </div>
-              <span className="text-xs font-semibold max-w-[85px] truncate hidden sm:inline">
-                {currentUser.username}
-              </span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={onOpenAuthModal}
-              className="flex items-center gap-1.5 py-2 px-2.5 sm:px-3 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-bold text-xs tracking-wide shadow-md shadow-cyan-500/20 transition-all cursor-pointer shrink-0 whitespace-nowrap"
-            >
-              <UserIcon className="w-3.5 h-3.5 shrink-0" />
-              <span>{t.navSignIn}</span>
-            </button>
-          )}
+          {/* User Profile / Sign In Button (visible on >= sm; collapsed into hamburger drawer on mobile < sm) */}
+          <div className="hidden sm:flex items-center">
+            {currentUser ? (
+              <button
+                type="button"
+                onClick={onOpenProfileModal}
+                className="flex items-center justify-center gap-1.5 sm:gap-2 min-h-[40px] py-1.5 px-2.5 sm:px-3 rounded-xl bg-[#151722] hover:bg-[#1E2130] border border-[#272B3C] text-white transition-colors cursor-pointer shrink-0 touch-manipulation active:scale-95"
+                title={currentUser.username}
+              >
+                <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-cyan-500 to-purple-600 flex items-center justify-center text-xs font-black text-black uppercase shrink-0">
+                  {currentUser.username.slice(0, 1)}
+                </div>
+                <span className="text-xs font-semibold max-w-[70px] sm:max-w-[85px] truncate">
+                  {currentUser.username}
+                </span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onOpenAuthModal}
+                className="flex items-center justify-center gap-1 sm:gap-1.5 min-h-[40px] py-2 px-2.5 sm:px-3 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-bold text-xs tracking-wide shadow-md shadow-cyan-500/20 transition-all cursor-pointer shrink-0 whitespace-nowrap touch-manipulation active:scale-95"
+              >
+                <UserIcon className="w-3.5 h-3.5 shrink-0" />
+                <span>{t.navSignIn}</span>
+              </button>
+            )}
+          </div>
 
-          {/* Bilingual Language Switcher (EN | عربي) */}
+          {/* Bilingual Language Switcher (visible on >= sm; collapsed into hamburger drawer on mobile < sm) */}
           <button
             type="button"
             onClick={onToggleLanguage}
-            className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl bg-[#151722] hover:bg-[#1E2130] border border-[#252838] hover:border-cyan-500/40 text-xs font-bold text-cyan-400 hover:text-cyan-300 transition-colors cursor-pointer shrink-0"
+            className="hidden sm:flex items-center justify-center gap-1 min-h-[40px] min-w-[40px] px-2 sm:px-2.5 py-2 rounded-xl bg-[#151722] hover:bg-[#1E2130] border border-[#252838] hover:border-cyan-500/40 text-xs font-bold text-cyan-400 hover:text-cyan-300 transition-colors cursor-pointer shrink-0 touch-manipulation active:scale-95"
             title="Switch Language / تغيير اللغة"
           >
             <Globe className="w-3.5 h-3.5 shrink-0 text-cyan-400" />
-            <span className="font-semibold">{lang === 'en' ? 'عربي' : 'EN'}</span>
+            <span className="font-semibold text-[11px] sm:text-xs">{lang === 'en' ? 'عربي' : 'EN'}</span>
           </button>
 
           {/* Mobile / Tablet Hamburger Menu Button (visible on < lg) */}
           <button
             type="button"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="lg:hidden p-2 rounded-xl bg-[#151722] border border-[#252838] text-neutral-300 hover:text-white transition-colors cursor-pointer shrink-0"
+            className="lg:hidden min-h-[40px] min-w-[40px] p-2 rounded-xl bg-[#151722] border border-[#252838] text-neutral-300 hover:text-white transition-colors cursor-pointer shrink-0 flex items-center justify-center touch-manipulation active:scale-95"
             aria-label="Toggle Navigation Menu"
           >
             {mobileMenuOpen ? <X className="w-5 h-5 text-cyan-400" /> : <Menu className="w-5 h-5" />}
@@ -475,7 +477,77 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Guarantees 100% elements are fully accessible on mobile   */}
       {/* ========================================================= */}
       {mobileMenuOpen && (
-        <div className="lg:hidden px-4 py-4 bg-[#0B0C12]/98 backdrop-blur-2xl border-t border-[#1C1E28] space-y-4 max-h-[80vh] overflow-y-auto">
+        <div className="lg:hidden px-3.5 sm:px-6 py-4 bg-[#0B0C12]/98 backdrop-blur-2xl border-t border-[#1C1E28] space-y-4 max-h-[85vh] overflow-y-auto animate-fade-in shadow-2xl">
+          {/* Section 0: Mobile Account, Language & Quick Actions Hub */}
+          <div className="p-3 rounded-2xl bg-gradient-to-r from-[#151724] to-[#11121A] border border-[#262A3C] shadow-lg flex flex-col gap-2.5">
+            <div className="flex items-center justify-between gap-2">
+              {currentUser ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    onOpenProfileModal();
+                  }}
+                  className="flex items-center gap-2.5 text-left flex-1 min-w-0 p-1 rounded-xl hover:bg-[#1E2132] transition-colors cursor-pointer touch-manipulation active:scale-[0.98]"
+                >
+                  <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-purple-600 flex items-center justify-center text-sm font-black text-black uppercase shrink-0 shadow-md">
+                    {currentUser.username.slice(0, 1)}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-bold text-white truncate flex items-center gap-1.5">
+                      <span>{currentUser.username}</span>
+                      <span className="px-1.5 py-0.2 rounded-md bg-cyan-500/10 text-cyan-400 text-[9px] font-mono border border-cyan-500/20">
+                        {t.navProfile}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-neutral-400 truncate mt-0.5">{currentUser.email || 'DeskSpace Member'}</div>
+                  </div>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    onOpenAuthModal();
+                  }}
+                  className="flex-1 flex items-center justify-center gap-2 py-2.5 px-3.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-black text-xs shadow-md shadow-cyan-500/20 transition-all cursor-pointer min-h-[44px] touch-manipulation active:scale-[0.98]"
+                >
+                  <UserIcon className="w-4 h-4 stroke-[2.5]" />
+                  <span>{t.navSignIn} / {t.navSignUp}</span>
+                </button>
+              )}
+
+              {/* Language Switcher inside Mobile Drawer */}
+              <button
+                type="button"
+                onClick={onToggleLanguage}
+                className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-[#1B1E2D] hover:bg-[#23273A] border border-[#2C3146] text-cyan-400 hover:text-cyan-300 font-bold text-xs transition-colors shrink-0 min-h-[44px] touch-manipulation active:scale-[0.98]"
+                title="Switch Language / تغيير اللغة"
+              >
+                <Globe className="w-4 h-4" />
+                <span>{lang === 'en' ? 'عربي' : 'English'}</span>
+              </button>
+            </div>
+
+            {/* Quick Favorites Row in Mobile Drawer */}
+            <button
+              type="button"
+              onClick={() => {
+                setMobileMenuOpen(false);
+                onOpenFavorites();
+              }}
+              className="w-full flex items-center justify-between p-2.5 rounded-xl bg-[#12131B] border border-[#202332] text-xs font-semibold text-neutral-300 hover:text-white transition-colors cursor-pointer touch-manipulation active:scale-[0.98]"
+            >
+              <span className="flex items-center gap-2">
+                <Heart className={`w-4 h-4 ${favoritesCount > 0 ? 'text-rose-500 fill-rose-500' : 'text-neutral-400'}`} />
+                <span>{t.navFavorites}</span>
+              </span>
+              <span className="px-2 py-0.5 rounded-full bg-[#1C1F2D] text-cyan-400 font-mono text-[11px] font-bold">
+                {favoritesCount}
+              </span>
+            </button>
+          </div>
+
           {/* Section 1: Main Platform Views */}
           <div>
             <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-neutral-400 mb-2">
@@ -485,13 +557,13 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 type="button"
                 onClick={() => handleCategoryClick('All')}
-                className={`p-3 rounded-xl border text-xs font-bold flex items-center gap-2.5 transition-all text-left ${
+                className={`p-3 rounded-xl border text-xs font-bold flex items-center gap-2.5 transition-all text-left min-h-[48px] touch-manipulation active:scale-[0.98] ${
                   currentCategory === 'All'
                     ? 'bg-cyan-500 text-black border-cyan-400 shadow-md'
                     : 'bg-[#131520] text-neutral-200 border-[#222638] hover:bg-[#1A1C2C]'
                 }`}
               >
-                <Monitor className="w-4 h-4 text-cyan-400" />
+                <Monitor className="w-4 h-4 text-cyan-400 shrink-0" />
                 <div className="flex flex-col">
                   <span>{t.navAll}</span>
                   <span className="text-[10px] font-normal opacity-75">
@@ -503,13 +575,13 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 type="button"
                 onClick={() => handleCategoryClick('MobileLive')}
-                className={`p-3 rounded-xl border text-xs font-bold flex items-center gap-2.5 transition-all text-left ${
+                className={`p-3 rounded-xl border text-xs font-bold flex items-center gap-2.5 transition-all text-left min-h-[48px] touch-manipulation active:scale-[0.98] ${
                   currentCategory === 'MobileLive'
                     ? 'bg-gradient-to-r from-purple-600 to-fuchsia-600 text-white border-fuchsia-400 shadow-md'
                     : 'bg-[#151222] text-fuchsia-200 border-fuchsia-500/30 hover:bg-[#1E1830]'
                 }`}
               >
-                <Smartphone className="w-4 h-4 text-fuchsia-400" />
+                <Smartphone className="w-4 h-4 text-fuchsia-400 shrink-0" />
                 <div className="flex flex-col">
                   <span className="flex items-center gap-1.5">
                     <span>{t.navMobileLive}</span>
@@ -524,13 +596,13 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 type="button"
                 onClick={() => handleCategoryClick('Live')}
-                className={`p-3 rounded-xl border text-xs font-bold flex items-center gap-2.5 transition-all text-left ${
+                className={`p-3 rounded-xl border text-xs font-bold flex items-center gap-2.5 transition-all text-left min-h-[48px] touch-manipulation active:scale-[0.98] ${
                   currentCategory === 'Live'
                     ? 'bg-gradient-to-r from-rose-600 to-purple-600 text-white border-rose-400 shadow-md'
                     : 'bg-[#1C1420] text-rose-200 border-rose-500/30 hover:bg-[#251A2C]'
                 }`}
               >
-                <Film className="w-4 h-4 text-rose-400" />
+                <Film className="w-4 h-4 text-rose-400 shrink-0" />
                 <div className="flex flex-col">
                   <span>{t.navLive}</span>
                   <span className="text-[10px] font-normal opacity-75">
@@ -542,13 +614,13 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 type="button"
                 onClick={() => handleCategoryClick('Blog')}
-                className={`p-3 rounded-xl border text-xs font-bold flex items-center gap-2.5 transition-all text-left ${
+                className={`p-3 rounded-xl border text-xs font-bold flex items-center gap-2.5 transition-all text-left min-h-[48px] touch-manipulation active:scale-[0.98] ${
                   currentCategory === 'Blog'
                     ? 'bg-cyan-500 text-black border-cyan-400 shadow-md'
                     : 'bg-[#131520] text-cyan-300 border-cyan-500/30 hover:bg-[#1A1C2C]'
                 }`}
               >
-                <BookOpen className="w-4 h-4 text-cyan-400" />
+                <BookOpen className="w-4 h-4 text-cyan-400 shrink-0" />
                 <div className="flex flex-col">
                   <span>{t.navBlog}</span>
                   <span className="text-[10px] font-normal opacity-75">
@@ -564,13 +636,13 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-neutral-400 mb-2">
               {lang === 'ar' ? 'تصنيفات سطح المكتب (16:9)' : 'Desktop Categories (16:9)'}
             </div>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap gap-1.5 sm:gap-2">
               {CATEGORIES.map((cat) => (
                 <button
                   key={cat}
                   type="button"
                   onClick={() => handleCategoryClick(cat)}
-                  className={`px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
+                  className={`px-3 py-2 rounded-xl border text-xs font-semibold transition-all min-h-[38px] touch-manipulation active:scale-[0.98] ${
                     currentCategory === cat
                       ? 'bg-cyan-500 text-black border-cyan-400 shadow-sm'
                       : 'bg-[#141620] text-neutral-300 border-[#242738] hover:bg-[#1B1E2C]'
@@ -587,14 +659,14 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-neutral-400 mb-2">
               {t.navLegalMenu}
             </div>
-            <div className="flex flex-wrap gap-1.5 text-xs">
+            <div className="flex flex-wrap gap-1.5 sm:gap-2 text-xs">
               <button
                 type="button"
                 onClick={() => {
                   onOpenLegalModal('privacy');
                   setMobileMenuOpen(false);
                 }}
-                className="px-2.5 py-1.5 rounded-lg bg-[#141620] border border-[#242738] text-neutral-300 hover:text-white"
+                className="px-3 py-2 rounded-xl bg-[#141620] border border-[#242738] text-neutral-300 hover:text-white min-h-[38px] touch-manipulation active:scale-[0.98]"
               >
                 {t.privacyPolicy}
               </button>
@@ -604,7 +676,7 @@ export const Header: React.FC<HeaderProps> = ({
                   onOpenLegalModal('terms');
                   setMobileMenuOpen(false);
                 }}
-                className="px-2.5 py-1.5 rounded-lg bg-[#141620] border border-[#242738] text-neutral-300 hover:text-white"
+                className="px-3 py-2 rounded-xl bg-[#141620] border border-[#242738] text-neutral-300 hover:text-white min-h-[38px] touch-manipulation active:scale-[0.98]"
               >
                 {t.termsOfService}
               </button>
@@ -614,7 +686,7 @@ export const Header: React.FC<HeaderProps> = ({
                   onOpenLegalModal('about');
                   setMobileMenuOpen(false);
                 }}
-                className="px-2.5 py-1.5 rounded-lg bg-[#141620] border border-[#242738] text-neutral-300 hover:text-white"
+                className="px-3 py-2 rounded-xl bg-[#141620] border border-[#242738] text-neutral-300 hover:text-white min-h-[38px] touch-manipulation active:scale-[0.98]"
               >
                 {t.aboutUs}
               </button>
@@ -624,7 +696,7 @@ export const Header: React.FC<HeaderProps> = ({
                   onOpenLegalModal('contact');
                   setMobileMenuOpen(false);
                 }}
-                className="px-2.5 py-1.5 rounded-lg bg-[#141620] border border-[#242738] text-neutral-300 hover:text-white"
+                className="px-3 py-2 rounded-xl bg-[#141620] border border-[#242738] text-neutral-300 hover:text-white min-h-[38px] touch-manipulation active:scale-[0.98]"
               >
                 {t.contactUs}
               </button>
@@ -634,11 +706,23 @@ export const Header: React.FC<HeaderProps> = ({
                   onOpenLegalModal('dmca');
                   setMobileMenuOpen(false);
                 }}
-                className="px-2.5 py-1.5 rounded-lg bg-[#181520] border border-amber-500/30 text-amber-400 hover:text-amber-300"
+                className="px-3 py-2 rounded-xl bg-[#181520] border border-amber-500/30 text-amber-400 hover:text-amber-300 min-h-[38px] touch-manipulation active:scale-[0.98]"
               >
                 {t.dmcaPolicy}
               </button>
             </div>
+          </div>
+
+          {/* Quick Drawer Close Button */}
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(false)}
+              className="w-full py-2.5 rounded-xl bg-[#161822] hover:bg-[#1E202E] border border-[#272A3C] text-neutral-400 hover:text-white text-xs font-semibold flex items-center justify-center gap-1.5 touch-manipulation cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>{t.close}</span>
+            </button>
           </div>
         </div>
       )}

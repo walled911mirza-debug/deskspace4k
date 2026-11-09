@@ -328,7 +328,7 @@ const WallpaperCardComponent: React.FC<WallpaperCardProps> = ({
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       style={{ transform: 'translateZ(0)', willChange: 'transform' }}
-      className="group relative rounded-2xl bg-[#16171E] border border-[#242634] hover:border-cyan-500/40 shadow-xl overflow-hidden transition-all duration-300 flex flex-col justify-between transform-gpu will-change-transform [backface-visibility:hidden] [transform:translateZ(0)]"
+      className="group relative rounded-xl sm:rounded-2xl bg-[#16171E] border border-[#242634] hover:border-cyan-500/40 shadow-xl overflow-hidden transition-all duration-300 flex flex-col justify-between transform-gpu will-change-transform [backface-visibility:hidden] [transform:translateZ(0)]"
     >
       {/* 1. Media Container: Responsive 16:9 for desktop and 9:16 portrait for mobile */}
       <div
@@ -339,50 +339,50 @@ const WallpaperCardComponent: React.FC<WallpaperCardProps> = ({
         {/* Skeleton pulse indicator while image is loading */}
         {!imageLoaded && !hasPermanentError && (
           <div className="absolute inset-0 bg-[#12131A] animate-pulse flex items-center justify-center z-0">
-            <span className="text-[11px] text-neutral-600 font-mono tracking-wider">
-              {isMobileCard ? '9:16 4K VERTICAL' : '4K ULTRA HD'}
+            <span className="text-[9px] sm:text-[11px] text-neutral-600 font-mono tracking-wider">
+              {isMobileCard ? '9:16 VERTICAL' : '4K ULTRA HD'}
             </span>
           </div>
         )}
 
         {/* Mobile Format indicator badge */}
         {isMobileCard && (
-          <div className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-md bg-black/75 backdrop-blur-md border border-fuchsia-500/30 text-[10px] font-semibold text-fuchsia-300 flex items-center gap-1 z-10 pointer-events-none">
+          <div className="absolute top-2 left-2 sm:top-2.5 sm:left-2.5 px-1.5 py-0.5 rounded-md bg-black/75 backdrop-blur-md border border-fuchsia-500/30 text-[9px] sm:text-[10px] font-semibold text-fuchsia-300 flex items-center gap-1 z-10 pointer-events-none">
             <Smartphone className="w-2.5 h-2.5 text-fuchsia-400" />
-            <span className="font-mono text-[9px]">9:16</span>
+            <span className="font-mono text-[8px] sm:text-[9px]">9:16</span>
           </div>
         )}
 
         {/* Fallback Placeholder UI: Rendered whenever an image fails or media is missing (Strict zero blank card guarantee) */}
         {hasPermanentError || !currentImgSrc || currentImgSrc.trim() === '' ? (
-          <div className="absolute inset-0 w-full h-full bg-gradient-to-br from-[#0B0C12] via-[#121422] to-[#07080D] flex flex-col items-center justify-center p-4 text-center select-none border border-cyan-500/20 transform-gpu will-change-transform [transform:translateZ(0)]">
+          <div className="absolute inset-0 w-full h-full bg-gradient-to-br from-[#0B0C12] via-[#121422] to-[#07080D] flex flex-col items-center justify-center p-3 sm:p-4 text-center select-none border border-cyan-500/20 transform-gpu will-change-transform [transform:translateZ(0)]">
             {/* Ambient glowing radial effect */}
             <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(6,182,212,0.14),transparent_70%)] pointer-events-none" />
 
-            <div className="relative z-10 flex flex-col items-center gap-2">
-              <div className="p-1.5 rounded-2xl bg-[#0D0F18] border border-cyan-500/35 shadow-lg shadow-cyan-500/10">
-                <DeskSpaceLogo size={isMobileCard ? 36 : 42} showText={false} />
+            <div className="relative z-10 flex flex-col items-center gap-1.5 sm:gap-2">
+              <div className="p-1 sm:p-1.5 rounded-xl sm:rounded-2xl bg-[#0D0F18] border border-cyan-500/35 shadow-lg shadow-cyan-500/10">
+                <DeskSpaceLogo size={isMobileCard ? 28 : 34} showText={false} />
               </div>
 
-              <div className="px-2">
-                <div className="text-[10px] font-mono font-black tracking-widest text-cyan-400 uppercase">
+              <div className="px-1 sm:px-2 max-w-full">
+                <div className="text-[9px] sm:text-[10px] font-mono font-black tracking-widest text-cyan-400 uppercase">
                   DESKSPACE4K
                 </div>
-                <h4 className="text-xs font-bold text-white line-clamp-1 max-w-[210px] mt-0.5" title={currentTitle}>
+                <h4 className="text-[11px] sm:text-xs font-bold text-white line-clamp-1 max-w-[180px] sm:max-w-[210px] mt-0.5" title={currentTitle}>
                   {currentTitle}
                 </h4>
-                <div className="text-[10px] text-neutral-400 font-mono mt-0.5">
+                <div className="text-[9px] sm:text-[10px] text-neutral-400 font-mono mt-0.5 truncate">
                   {cleanResolution} · {wallpaper.category}
                 </div>
               </div>
 
-              <div className="px-2.5 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/25 text-[9px] font-mono text-cyan-300">
-                {lang === 'ar' ? 'معاينة 4K رقمية جاهزة' : '4K Optical Master'}
+              <div className="px-2 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/25 text-[8px] sm:text-[9px] font-mono text-cyan-300">
+                {lang === 'ar' ? 'معاينة 4K رقمية' : '4K Master'}
               </div>
             </div>
           </div>
         ) : (
-          /* High-Resolution Static 4K Poster: Preloads ONLY poster images by default with zero idle video decoder allocation */
+          /* High-Resolution Static 4K Poster */
           <img
             src={currentImgSrc}
             alt={`${currentTitle} - 4K Ultra HD Desktop Wallpaper (${wallpaper.resolution || '3840×2160'}) - ${wallpaper.category}`}
@@ -429,23 +429,23 @@ const WallpaperCardComponent: React.FC<WallpaperCardProps> = ({
 
         {/* Subtle hover play hint for Live Wallpapers */}
         {isVideo && !isHoverIntentConfirmed && (
-          <div className="absolute bottom-2.5 right-2.5 px-2 py-0.5 rounded-md bg-black/75 backdrop-blur-md border border-white/10 text-[10px] font-medium text-neutral-300 flex items-center gap-1.5 opacity-90 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+          <div className="absolute bottom-2 right-2 sm:bottom-2.5 sm:right-2.5 px-1.5 sm:px-2 py-0.5 rounded-md bg-black/75 backdrop-blur-md border border-white/10 text-[9px] sm:text-[10px] font-medium text-neutral-300 flex items-center gap-1 opacity-90 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
             <Play className="w-2.5 h-2.5 fill-rose-400 text-rose-400" />
-            <span className="font-mono text-[9px] text-neutral-200">
-              {lang === 'ar' ? 'مرر للمعاينة' : 'Hover to Play'}
+            <span className="font-mono text-[8px] sm:text-[9px] text-neutral-200 hidden xs:inline sm:inline">
+              {lang === 'ar' ? 'معاينة' : 'Play'}
             </span>
           </div>
         )}
       </div>
 
       {/* 2. Card Info & Actions: Clean metadata positioned OUTSIDE the artwork */}
-      <div className="p-4 flex flex-col justify-between flex-1 bg-[#16171E]">
+      <div className="p-2.5 sm:p-4 flex flex-col justify-between flex-1 bg-[#16171E]">
         <div>
           {/* Title & Live / Mobile indicators */}
-          <div className="flex items-start justify-between gap-2">
+          <div className="flex items-start justify-between gap-1.5 sm:gap-2">
             <h3
               onClick={handleCardClick}
-              className="text-sm font-bold text-white group-hover:text-cyan-300 transition-colors cursor-pointer truncate flex-1 break-words [overflow-wrap:break-word] [word-break:break-word]"
+              className="text-xs sm:text-sm font-bold text-white group-hover:text-cyan-300 transition-colors cursor-pointer truncate flex-1 min-w-0"
               title={currentTitle}
             >
               {currentTitle}
@@ -453,49 +453,47 @@ const WallpaperCardComponent: React.FC<WallpaperCardProps> = ({
 
             <div className="flex items-center gap-1 shrink-0">
               {isMobileCard && (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/30">
+                <span className="inline-flex items-center gap-0.5 sm:gap-1 px-1 sm:px-1.5 py-0.5 rounded-md text-[9px] sm:text-[10px] font-bold bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/30">
                   <Smartphone className="w-2.5 h-2.5" />
-                  <span>9:16</span>
+                  <span className="hidden sm:inline">9:16</span>
                 </span>
               )}
               {wallpaper.isLive && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30">
+                <span className="inline-flex items-center gap-0.5 sm:gap-1 px-1 sm:px-1.5 py-0.5 rounded-md text-[9px] sm:text-[10px] font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30">
                   <Play className="w-2.5 h-2.5 fill-current" />
-                  <span>60 FPS</span>
+                  <span className="text-[8px] sm:text-[9px]">60FPS</span>
                 </span>
               )}
             </div>
           </div>
 
           {/* Clean metadata (Resolution, Category, Downloads, File Size) */}
-          <div className="flex flex-wrap items-center gap-2 text-[11px] text-neutral-400 mt-2 font-normal">
+          <div className="flex flex-wrap items-center gap-1 sm:gap-1.5 text-[10px] sm:text-[11px] text-neutral-400 mt-1.5 sm:mt-2 font-normal leading-tight">
             <span className="font-mono text-cyan-400 font-semibold">{cleanResolution}</span>
             <span aria-hidden="true" className="text-neutral-600">·</span>
-            <span>{t.categories[wallpaper.category] || wallpaper.category}</span>
-            <span aria-hidden="true" className="text-neutral-600">·</span>
-            <span className="font-mono tabular-nums">
+            <span className="truncate max-w-[80px] sm:max-w-none">{t.categories[wallpaper.category] || wallpaper.category}</span>
+            <span aria-hidden="true" className="text-neutral-600 hidden sm:inline">·</span>
+            <span className="font-mono tabular-nums hidden sm:inline">
               {wallpaper.downloads.toLocaleString()} {t.downloadsCount}
             </span>
-            <span aria-hidden="true" className="text-neutral-600">·</span>
-            <span className="font-mono text-neutral-500">{wallpaper.fileSize}</span>
           </div>
         </div>
 
         {/* Action Row: Primary 4K Download button & Favorite heart button */}
-        <div className="mt-4 pt-3 border-t border-[#222432] flex items-center gap-2">
+        <div className="mt-2.5 sm:mt-4 pt-2 sm:pt-3 border-t border-[#222432] flex items-center gap-1.5 sm:gap-2">
           <button
             type="button"
             onClick={() => onOpenDownloadModal(wallpaper)}
-            className="flex-1 flex items-center justify-center gap-2 py-2 px-3.5 rounded-xl text-xs font-bold bg-[#20222D] hover:bg-gradient-to-r hover:from-cyan-500 hover:to-blue-600 text-neutral-200 hover:text-black border border-[#2B2F40] hover:border-transparent transition-all shadow-sm cursor-pointer"
+            className="flex-1 flex items-center justify-center gap-1.5 sm:gap-2 min-h-[40px] sm:min-h-[42px] py-2 px-2 sm:px-3.5 rounded-xl text-[11px] sm:text-xs font-bold bg-[#20222D] hover:bg-gradient-to-r hover:from-cyan-500 hover:to-blue-600 text-neutral-200 hover:text-black border border-[#2B2F40] hover:border-transparent transition-all shadow-sm cursor-pointer touch-manipulation active:scale-[0.98]"
           >
-            <Download className="w-3.5 h-3.5 stroke-[2.5]" />
-            <span>{t.download4K}</span>
+            <Download className="w-3.5 h-3.5 stroke-[2.5] shrink-0" />
+            <span className="truncate">{t.download4K}</span>
           </button>
 
           <button
             type="button"
             onClick={() => onToggleFavorite(wallpaper.id)}
-            className={`p-2 rounded-xl transition-all border cursor-pointer shrink-0 ${
+            className={`min-h-[40px] min-w-[40px] sm:min-h-[42px] sm:min-w-[42px] p-2 rounded-xl transition-all border cursor-pointer shrink-0 flex items-center justify-center touch-manipulation active:scale-[0.98] ${
               isFavorited
                 ? 'bg-rose-500/20 border-rose-500/50 text-rose-400'
                 : 'bg-[#20222D] hover:bg-[#282B38] border-[#2B2F40] text-neutral-400 hover:text-white'

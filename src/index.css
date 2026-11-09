@@ -6,11 +6,22 @@
   --font-arabic: 'Cairo', system-ui, -apple-system, sans-serif;
 }
 
+html {
+  overflow-x: hidden;
+  max-width: 100%;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+
 body {
   font-family: var(--font-sans);
   background-color: #101010;
   color: #E2E8F0;
   overflow-x: hidden;
+  max-width: 100%;
+  min-height: 100vh;
+  -webkit-tap-highlight-color: transparent;
 }
 
 [dir="rtl"] {
@@ -31,4 +42,14 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #3B4257;
+}
+
+/* Touch-optimized horizontal scroller utility */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
 }

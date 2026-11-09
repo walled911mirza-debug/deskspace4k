@@ -152,7 +152,7 @@ export const Pagination: React.FC<PaginationProps> = ({
       </div>
 
       {/* 2. Main Navigation Buttons Bar */}
-      <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2">
+      <div className="flex flex-wrap items-center justify-center gap-1 sm:gap-2 max-w-full">
         {/* First Page Button */}
         <button
           type="button"
@@ -160,7 +160,7 @@ export const Pagination: React.FC<PaginationProps> = ({
           disabled={currentPage === 1}
           aria-label="First page"
           title={t.paginationFirst || (lang === 'ar' ? 'البداية' : 'First')}
-          className={`h-9 px-3 rounded-xl border text-xs font-medium flex items-center gap-1 transition-all cursor-pointer ${
+          className={`hidden sm:flex h-9 px-3 rounded-xl border text-xs font-medium items-center gap-1 transition-all cursor-pointer touch-manipulation active:scale-95 ${
             currentPage === 1 ? disabledBtnClasses : idleBtnClasses
           }`}
         >
@@ -175,7 +175,7 @@ export const Pagination: React.FC<PaginationProps> = ({
           disabled={currentPage === 1}
           aria-label="Previous page"
           title={t.paginationPrev || (lang === 'ar' ? 'السابق' : 'Previous')}
-          className={`h-9 px-3 rounded-xl border text-xs font-medium flex items-center gap-1 transition-all cursor-pointer ${
+          className={`h-9 px-2.5 sm:px-3 rounded-xl border text-xs font-medium flex items-center justify-center gap-1 transition-all cursor-pointer min-w-[38px] touch-manipulation active:scale-95 ${
             currentPage === 1 ? disabledBtnClasses : idleBtnClasses
           }`}
         >
@@ -184,13 +184,13 @@ export const Pagination: React.FC<PaginationProps> = ({
         </button>
 
         {/* Numbered Page Buttons & Ellipsis */}
-        <div className="flex items-center gap-1 sm:gap-1.5 mx-0.5" dir="ltr">
+        <div className="flex items-center gap-1 sm:gap-1.5 mx-0.5 overflow-x-auto max-w-full no-scrollbar py-0.5" dir="ltr">
           {pageNumbers.map((p, idx) => {
             if (p === 'ellipsis') {
               return (
                 <span
                   key={`ellipsis-${idx}`}
-                  className="w-8 h-9 flex items-center justify-center text-neutral-500 font-mono text-sm select-none"
+                  className="w-6 sm:w-8 h-9 flex items-center justify-center text-neutral-500 font-mono text-xs sm:text-sm select-none"
                 >
                   &hellip;
                 </span>
@@ -205,7 +205,7 @@ export const Pagination: React.FC<PaginationProps> = ({
                 onClick={() => handlePageClick(p)}
                 aria-current={isCurrent ? 'page' : undefined}
                 aria-label={`Page ${p}`}
-                className={`w-9 h-9 rounded-xl border text-xs font-mono flex items-center justify-center transition-all cursor-pointer ${
+                className={`w-8 sm:w-9 h-9 rounded-xl border text-xs font-mono flex items-center justify-center transition-all cursor-pointer touch-manipulation active:scale-95 shrink-0 ${
                   isCurrent ? activeBtnClasses : idleBtnClasses
                 }`}
               >
@@ -222,7 +222,7 @@ export const Pagination: React.FC<PaginationProps> = ({
           disabled={currentPage >= totalPages}
           aria-label="Next page"
           title={t.paginationNext || (lang === 'ar' ? 'التالي' : 'Next')}
-          className={`h-9 px-3 rounded-xl border text-xs font-medium flex items-center gap-1 transition-all cursor-pointer ${
+          className={`h-9 px-2.5 sm:px-3 rounded-xl border text-xs font-medium flex items-center justify-center gap-1 transition-all cursor-pointer min-w-[38px] touch-manipulation active:scale-95 ${
             currentPage >= totalPages ? disabledBtnClasses : idleBtnClasses
           }`}
         >
@@ -237,7 +237,7 @@ export const Pagination: React.FC<PaginationProps> = ({
           disabled={currentPage >= totalPages}
           aria-label="Last page"
           title={t.paginationLast || (lang === 'ar' ? 'الأخيرة' : 'Last')}
-          className={`h-9 px-3 rounded-xl border text-xs font-medium flex items-center gap-1 transition-all cursor-pointer ${
+          className={`hidden sm:flex h-9 px-3 rounded-xl border text-xs font-medium items-center gap-1 transition-all cursor-pointer touch-manipulation active:scale-95 ${
             currentPage >= totalPages ? disabledBtnClasses : idleBtnClasses
           }`}
         >
