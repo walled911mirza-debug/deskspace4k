@@ -119,6 +119,13 @@ export const translations = {
     resMobile: 'Mobile 9:16 (1080×1920)',
 
     // Mobile Live Wallpaper & Instructions
+    tabMobileLive: 'Mobile Live (9:16)',
+    tabDesktop4K: 'Desktop 4K (16:9)',
+    downloadAsLivePhoto: 'Download Live Wallpaper (60 FPS)',
+    copySteps: 'Copy Setup Steps',
+    stepsCopied: 'Setup steps copied!',
+    iosNotice: 'Supported natively on iOS 17 & 18. No third-party apps required.',
+    androidNotice: 'Supported natively on Samsung One UI, Xiaomi HyperOS, Google Pixel.',
     mobileLiveOptionsTitle: 'Mobile Live Wallpaper (Live Photo / Video)',
     mobileLiveDesc: 'Optimized 9:16 vertical motion loop for iPhone Lock Screen Live Photos & Android Video Wallpapers.',
     downloadForIPhone: 'Download for iPhone (Live Wallpaper)',
@@ -402,6 +409,13 @@ export const translations = {
     resMobile: 'الهاتف الذكي 9:16 (1080×1920)',
 
     // Mobile Live Wallpaper & Instructions
+    tabMobileLive: 'خلفية هاتف حية (9:16)',
+    tabDesktop4K: 'سطح المكتب 4K (16:9)',
+    downloadAsLivePhoto: 'تحميل كخلفية حية (60 FPS)',
+    copySteps: 'نسخ خطوات التعيين',
+    stepsCopied: 'تم نسخ خطوات التعيين بنجاح!',
+    iosNotice: 'مدعوم أصلياً على iOS 17 و 18 دون الحاجة لأي تطبيقات إضافية.',
+    androidNotice: 'مدعوم أصلياً على هواتف سامسونج، شاومي، بيكسل ومعظم واجهات أندرويد.',
     mobileLiveOptionsTitle: 'خلفية هاتف حية (Live Photo / فيديو شاشة القفل)',
     mobileLiveDesc: 'حلقة فيديو عمودية فائقة الدقة 9:16 مجهزة خصيصاً لميزة Live Photo في iPhone وخلفيات الفيديو في Android.',
     downloadForIPhone: 'تحميل لـ iPhone (خلفية حية iOS)',

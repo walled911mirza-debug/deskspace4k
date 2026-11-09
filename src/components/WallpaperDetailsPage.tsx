@@ -162,6 +162,7 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
   const [downloadingMobile, setDownloadingMobile] = useState<MobilePlatform | null>(null);
   const [mobilePlatform, setMobilePlatform] = useState<MobilePlatform>(() => detectMobilePlatform());
   const [isMobileGuideOpen, setIsMobileGuideOpen] = useState(false);
+  const [copiedSteps, setCopiedSteps] = useState(false);
   const [isZoomed, setIsZoomed] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
 
@@ -606,6 +607,25 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
       // Fallback
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 2500);
+    }
+  };
+
+  const handleCopySteps = () => {
+    const stepsText =
+      mobilePlatform === 'ios'
+        ? `${t.mobileGuideIos}:\n${t.iosStep1}\n${t.iosStep2}\n${t.iosStep3}`
+        : `${t.mobileGuideAndroid}:\n${t.androidStep1}\n${t.androidStep2}\n${t.androidStep3}`;
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(stepsText).then(() => {
+        setCopiedSteps(true);
+        setTimeout(() => setCopiedSteps(false), 2500);
+      }).catch(() => {
+        setCopiedSteps(true);
+        setTimeout(() => setCopiedSteps(false), 2500);
+      });
+    } else {
+      setCopiedSteps(true);
+      setTimeout(() => setCopiedSteps(false), 2500);
     }
   };
 
@@ -1121,14 +1141,14 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
             )}
 
             {/* Dedicated Mobile Live Wallpaper / Live Photo Feature Box */}
-            <div className="mt-2 p-3 sm:p-4 rounded-2xl bg-gradient-to-b from-[#161824] to-[#101118] border border-cyan-500/30 space-y-3 shadow-lg">
+            <div className="mt-2 p-3.5 sm:p-4 rounded-2xl bg-gradient-to-b from-[#161824] to-[#101118] border border-cyan-500/30 space-y-3 shadow-lg">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-cyan-500/15 text-cyan-400 border border-cyan-500/25">
+                  <div className="p-2 rounded-xl bg-cyan-500/15 text-cyan-400 border border-cyan-500/25">
                     <Smartphone className="w-4 h-4" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-bold text-white tracking-wide">
+                    <h4 className="text-xs sm:text-sm font-bold text-white tracking-wide">
                       {t.mobileLiveOptionsTitle}
                     </h4>
                     <p className="text-[10px] text-neutral-400">
@@ -1142,22 +1162,22 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
                   <button
                     type="button"
                     onClick={() => setMobilePlatform('ios')}
-                    className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer touch-manipulation active:scale-95 ${
+                    className={`min-h-[40px] px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer touch-manipulation active:scale-95 ${
                       mobilePlatform === 'ios'
-                        ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-black shadow-md'
+                        ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-black shadow-md font-black'
                         : 'text-neutral-400 hover:text-white'
                     }`}
                   >
                     <Apple className="w-3.5 h-3.5" />
-                    <span>iPhone</span>
+                    <span>iPhone (iOS 17+)</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setMobilePlatform('android')}
-                    className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer touch-manipulation active:scale-95 ${
+                    className={`min-h-[40px] px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer touch-manipulation active:scale-95 ${
                       mobilePlatform === 'android'
-                        ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-black shadow-md'
+                        ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-black shadow-md font-black'
                         : 'text-neutral-400 hover:text-white'
                     }`}
                   >
@@ -1172,7 +1192,7 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
                 type="button"
                 onClick={() => handleDownloadMobileLive(mobilePlatform)}
                 disabled={Boolean(downloadingMobile) || Boolean(downloadingType)}
-                className={`w-full flex items-center justify-center gap-2 min-h-[46px] py-2.5 px-4 rounded-xl font-bold text-xs sm:text-sm text-white shadow-lg transition-all touch-manipulation active:scale-[0.98] disabled:opacity-60 cursor-pointer ${
+                className={`w-full flex items-center justify-center gap-2.5 min-h-[50px] py-3 px-5 rounded-xl font-black text-xs sm:text-sm text-white shadow-xl transition-all touch-manipulation active:scale-[0.98] disabled:opacity-60 cursor-pointer ${
                   mobilePlatform === 'ios'
                     ? 'bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 shadow-cyan-500/25'
                     : 'bg-gradient-to-r from-emerald-500 via-teal-600 to-cyan-600 hover:from-emerald-400 hover:to-cyan-500 shadow-emerald-500/25'
@@ -1185,34 +1205,55 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
                   </>
                 ) : (
                   <>
-                    <Film className="w-4 h-4 shrink-0" />
+                    <Film className="w-4 h-4 shrink-0 animate-pulse" />
                     <span className="truncate">
-                      {mobilePlatform === 'ios' ? t.downloadForIPhone : t.downloadForAndroid}
+                      {mobilePlatform === 'ios'
+                        ? (lang === 'ar' ? 'تحميل كخلفية حية لـ iPhone (Live Photo)' : 'Download Live Wallpaper for iPhone')
+                        : (lang === 'ar' ? 'تحميل كفيديو حية لـ Android' : 'Download Live Wallpaper for Android')}
                     </span>
                   </>
                 )}
               </button>
 
               {/* Step-by-Step Instructions Toggle Accordion */}
-              <div className="pt-0.5 border-t border-[#1F2232]">
-                <button
-                  type="button"
-                  onClick={() => setIsMobileGuideOpen(!isMobileGuideOpen)}
-                  className="w-full flex items-center justify-between text-[11px] text-neutral-300 hover:text-cyan-300 transition-colors py-1 cursor-pointer touch-manipulation"
-                >
-                  <span className="flex items-center gap-1.5 font-semibold">
-                    <HelpCircle className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <div className="pt-1 border-t border-[#1F2232]">
+                <div className="flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => setIsMobileGuideOpen(!isMobileGuideOpen)}
+                    className="flex items-center gap-2 text-xs font-bold text-neutral-200 hover:text-cyan-300 transition-colors py-1 cursor-pointer touch-manipulation"
+                  >
+                    <HelpCircle className="w-4 h-4 text-cyan-400 shrink-0" />
                     <span>{t.mobileGuideToggle}</span>
-                  </span>
-                  <ChevronDown
-                    className={`w-3.5 h-3.5 text-neutral-400 transition-transform duration-200 shrink-0 ${
-                      isMobileGuideOpen ? 'rotate-180 text-cyan-400' : ''
-                    }`}
-                  />
-                </button>
+                    <ChevronDown
+                      className={`w-3.5 h-3.5 text-neutral-400 transition-transform duration-200 shrink-0 ${
+                        isMobileGuideOpen ? 'rotate-180 text-cyan-400' : ''
+                      }`}
+                    />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleCopySteps}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#191B26] hover:bg-[#222534] border border-[#2D3144] text-[11px] text-neutral-300 hover:text-white transition-all cursor-pointer touch-manipulation"
+                    title={t.copySteps}
+                  >
+                    {copiedSteps ? (
+                      <>
+                        <Check className="w-3 h-3 text-emerald-400" />
+                        <span className="text-emerald-400 font-semibold">{t.stepsCopied}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3 h-3 text-cyan-400" />
+                        <span>{t.copySteps}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
 
                 {isMobileGuideOpen && (
-                  <div className="mt-2 p-3 rounded-xl bg-[#0D0E14] border border-[#212435] text-[11px] space-y-2 text-neutral-300 animate-fade-in">
+                  <div className="mt-2.5 p-3 rounded-xl bg-[#0D0E14] border border-[#212435] text-xs space-y-2 text-neutral-300 animate-fade-in leading-relaxed">
                     <div className="font-bold text-cyan-400 text-xs flex items-center gap-1.5">
                       {mobilePlatform === 'ios' ? (
                         <>
@@ -1228,16 +1269,16 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
                     </div>
 
                     {mobilePlatform === 'ios' ? (
-                      <div className="space-y-1.5 text-neutral-300 leading-snug">
-                        <p>{t.iosStep1}</p>
-                        <p>{t.iosStep2}</p>
-                        <p>{t.iosStep3}</p>
+                      <div className="space-y-1.5 text-neutral-300">
+                        <p className="bg-[#14151F] p-2 rounded-xl border border-[#222538]">{t.iosStep1}</p>
+                        <p className="bg-[#14151F] p-2 rounded-xl border border-[#222538]">{t.iosStep2}</p>
+                        <p className="bg-[#14151F] p-2 rounded-xl border border-[#222538]">{t.iosStep3}</p>
                       </div>
                     ) : (
-                      <div className="space-y-1.5 text-neutral-300 leading-snug">
-                        <p>{t.androidStep1}</p>
-                        <p>{t.androidStep2}</p>
-                        <p>{t.androidStep3}</p>
+                      <div className="space-y-1.5 text-neutral-300">
+                        <p className="bg-[#14151F] p-2 rounded-xl border border-[#222538]">{t.androidStep1}</p>
+                        <p className="bg-[#14151F] p-2 rounded-xl border border-[#222538]">{t.androidStep2}</p>
+                        <p className="bg-[#14151F] p-2 rounded-xl border border-[#222538]">{t.androidStep3}</p>
                       </div>
                     )}
 

@@ -479,21 +479,31 @@ const WallpaperCardComponent: React.FC<WallpaperCardProps> = ({
           </div>
         </div>
 
-        {/* Action Row: Primary 4K Download button & Favorite heart button */}
+        {/* Action Row: Primary 4K / Mobile Download button & Favorite heart button */}
         <div className="mt-2.5 sm:mt-4 pt-2 sm:pt-3 border-t border-[#222432] flex items-center gap-1.5 sm:gap-2">
           <button
             type="button"
             onClick={() => onOpenDownloadModal(wallpaper)}
-            className="flex-1 flex items-center justify-center gap-1.5 sm:gap-2 min-h-[40px] sm:min-h-[42px] py-2 px-2 sm:px-3.5 rounded-xl text-[11px] sm:text-xs font-bold bg-[#20222D] hover:bg-gradient-to-r hover:from-cyan-500 hover:to-blue-600 text-neutral-200 hover:text-black border border-[#2B2F40] hover:border-transparent transition-all shadow-sm cursor-pointer touch-manipulation active:scale-[0.98]"
+            className={`flex-1 flex items-center justify-center gap-1.5 sm:gap-2 min-h-[42px] sm:min-h-[44px] py-2 px-2 sm:px-3.5 rounded-xl text-[11px] sm:text-xs font-bold transition-all shadow-sm cursor-pointer touch-manipulation active:scale-[0.98] ${
+              isMobileCard
+                ? 'bg-gradient-to-r from-emerald-500/20 via-cyan-500/20 to-blue-500/20 hover:from-emerald-500 hover:to-cyan-500 text-emerald-300 hover:text-black border border-emerald-500/30'
+                : 'bg-[#20222D] hover:bg-gradient-to-r hover:from-cyan-500 hover:to-blue-600 text-neutral-200 hover:text-black border border-[#2B2F40] hover:border-transparent'
+            }`}
           >
-            <Download className="w-3.5 h-3.5 stroke-[2.5] shrink-0" />
-            <span className="truncate">{t.download4K}</span>
+            {isMobileCard ? (
+              <Smartphone className="w-3.5 h-3.5 shrink-0 text-emerald-400 group-hover:text-black" />
+            ) : (
+              <Download className="w-3.5 h-3.5 stroke-[2.5] shrink-0" />
+            )}
+            <span className="truncate">
+              {isMobileCard ? (lang === 'ar' ? 'تحميل للهاتف (حلقة 9:16)' : 'Get Mobile Live') : t.download4K}
+            </span>
           </button>
 
           <button
             type="button"
             onClick={() => onToggleFavorite(wallpaper.id)}
-            className={`min-h-[40px] min-w-[40px] sm:min-h-[42px] sm:min-w-[42px] p-2 rounded-xl transition-all border cursor-pointer shrink-0 flex items-center justify-center touch-manipulation active:scale-[0.98] ${
+            className={`min-h-[42px] min-w-[42px] sm:min-h-[44px] sm:min-w-[44px] p-2 rounded-xl transition-all border cursor-pointer shrink-0 flex items-center justify-center touch-manipulation active:scale-[0.98] ${
               isFavorited
                 ? 'bg-rose-500/20 border-rose-500/50 text-rose-400'
                 : 'bg-[#20222D] hover:bg-[#282B38] border-[#2B2F40] text-neutral-400 hover:text-white'

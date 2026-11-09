@@ -11,7 +11,11 @@ import {
   ArrowRight,
   Sparkles,
   Filter,
-  Film
+  Film,
+  HelpCircle,
+  Apple,
+  Check,
+  Info,
 } from 'lucide-react';
 import { Wallpaper, Language } from '../types';
 import { translations } from '../translations';
@@ -44,6 +48,7 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
   const [topicFilter, setTopicFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [sortBy, setSortBy] = useState<'popular' | 'latest' | 'favorites'>('popular');
+  const [isGuideOpen, setIsGuideOpen] = useState(false);
 
   const t = translations[lang];
 
@@ -223,6 +228,61 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Quick Informative Guide Banner for Mobile Live Wallpapers */}
+          <div className="mt-6 p-4 rounded-2xl bg-[#171329]/80 border border-fuchsia-500/25 backdrop-blur-md">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-fuchsia-500/15 border border-fuchsia-500/30 text-fuchsia-300 shrink-0">
+                  <Film className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs sm:text-sm font-bold text-white flex items-center gap-2">
+                    <span>{lang === 'ar' ? 'كيف تعمل خلفيات الهاتف الحية؟' : 'How iPhone Live Photos & Android Video Wallpapers Work'}</span>
+                  </h3>
+                  <p className="text-[11px] text-neutral-300 mt-0.5 leading-snug">
+                    {lang === 'ar'
+                      ? 'جميع خلفيات هذا القسم مجهزة بحلقات فيديو عمودية 60 FPS (9:16) جاهزة للتعيين المباشر كشاشة قفل حية.'
+                      : 'All wallpapers here are precision-encoded 9:16 60 FPS loops compatible natively with iOS 17/18 and Android lock screens.'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsGuideOpen(!isGuideOpen)}
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-fuchsia-500/20 hover:bg-fuchsia-500/30 border border-fuchsia-500/40 text-fuchsia-200 text-xs font-bold transition-all cursor-pointer touch-manipulation min-h-[38px] shrink-0"
+              >
+                <HelpCircle className="w-3.5 h-3.5 text-fuchsia-300" />
+                <span>{isGuideOpen ? (lang === 'ar' ? 'إخفاء الدليل' : 'Hide Guide') : t.mobileGuideToggle}</span>
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isGuideOpen ? 'rotate-180' : ''}`} />
+              </button>
+            </div>
+
+            {isGuideOpen && (
+              <div className="mt-3 pt-3 border-t border-fuchsia-500/20 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs animate-fade-in">
+                <div className="p-3 rounded-xl bg-[#110D20] border border-fuchsia-500/20 space-y-1.5">
+                  <div className="font-bold text-cyan-300 flex items-center gap-1.5">
+                    <Apple className="w-4 h-4 text-cyan-400" />
+                    <span>{t.mobileGuideIos}</span>
+                  </div>
+                  <p className="text-[11px] text-neutral-300">{t.iosStep1}</p>
+                  <p className="text-[11px] text-neutral-300">{t.iosStep2}</p>
+                  <p className="text-[11px] text-neutral-300">{t.iosStep3}</p>
+                </div>
+
+                <div className="p-3 rounded-xl bg-[#110D20] border border-fuchsia-500/20 space-y-1.5">
+                  <div className="font-bold text-emerald-300 flex items-center gap-1.5">
+                    <Smartphone className="w-4 h-4 text-emerald-400" />
+                    <span>{t.mobileGuideAndroid}</span>
+                  </div>
+                  <p className="text-[11px] text-neutral-300">{t.androidStep1}</p>
+                  <p className="text-[11px] text-neutral-300">{t.androidStep2}</p>
+                  <p className="text-[11px] text-neutral-300">{t.androidStep3}</p>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -230,15 +290,15 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-[#211E2F]">
           {/* Topic Pills */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar touch-manipulation">
             {TOPICS.map((topic) => (
               <button
                 key={topic.id}
                 type="button"
                 onClick={() => setTopicFilter(topic.id)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                className={`px-3 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer min-h-[38px] ${
                   topicFilter === topic.id
-                    ? 'bg-gradient-to-r from-purple-600 to-fuchsia-600 text-white shadow-md shadow-fuchsia-500/25 border border-fuchsia-400/40'
+                    ? 'bg-gradient-to-r from-purple-600 to-fuchsia-600 text-white shadow-md shadow-fuchsia-500/25 border border-fuchsia-400/40 font-bold'
                     : 'bg-[#171424] text-neutral-400 hover:text-white hover:bg-[#201C32] border border-[#2B2642]'
                 }`}
               >
