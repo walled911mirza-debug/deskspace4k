@@ -171,9 +171,11 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
 
   if (!isOpen || !wallpaper) return null;
 
-  const t = translations[lang];
+  const t = (translations && (translations[lang] || translations.en)) || translations.en;
   const selectedRes = RESOLUTION_OPTIONS.find((r) => r.id === selectedResId) || RESOLUTION_OPTIONS[0];
-  const rawTitle = wallpaper.title[lang] || wallpaper.title.en;
+  const rawTitle = typeof wallpaper.title === 'object' && wallpaper.title
+    ? (wallpaper.title[lang] || wallpaper.title.en || wallpaper.title.ar || '')
+    : String(wallpaper.title || '');
   const currentTitle = cleanWallpaperTitle(rawTitle);
 
   const handleDownload = async () => {
@@ -387,7 +389,7 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
                   {/* Phone Notch/Island */}
                   <div className="w-16 h-3.5 bg-black rounded-full mb-1 z-20 shrink-0" />
                   <div className="relative w-full h-full rounded-[26px] overflow-hidden bg-black">
-                    {wallpaper.isLive && !videoError && (wallpaper.videoUrl || /\.(mp4|webm|mov|avi)$/i.test(wallpaper.url)) ? (
+                    {wallpaper.isLive && !videoError && (wallpaper.videoUrl || (wallpaper.url && /\.(mp4|webm|mov|avi)$/i.test(wallpaper.url))) ? (
                       <video
                         src={wallpaper.videoUrl || wallpaper.url}
                         autoPlay
@@ -399,7 +401,7 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
                       />
                     ) : (
                       <img
-                        src={previewImgUrl || getCategoryFallback(wallpaper.category)}
+                        src={previewImgUrl || wallpaper.posterUrl || wallpaper.thumbnailUrl || getCategoryFallback(wallpaper.category)}
                         alt={currentTitle}
                         referrerPolicy="no-referrer"
                         onError={() => {
@@ -423,7 +425,7 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
                   }`}
                   onClick={() => setPreviewZoom(!previewZoom)}
                 >
-                  {wallpaper.isLive && !videoError && (wallpaper.videoUrl || /\.(mp4|webm|mov|avi)$/i.test(wallpaper.url)) ? (
+                  {wallpaper.isLive && !videoError && (wallpaper.videoUrl || (wallpaper.url && /\.(mp4|webm|mov|avi)$/i.test(wallpaper.url))) ? (
                     <video
                       src={wallpaper.videoUrl || wallpaper.url}
                       autoPlay
@@ -438,7 +440,7 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
                     />
                   ) : (
                     <img
-                      src={previewImgUrl || getCategoryFallback(wallpaper.category)}
+                      src={previewImgUrl || wallpaper.posterUrl || wallpaper.thumbnailUrl || getCategoryFallback(wallpaper.category)}
                       alt={currentTitle}
                       referrerPolicy="no-referrer"
                       onError={() => {

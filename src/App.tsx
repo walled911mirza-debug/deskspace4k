@@ -1,11 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  Filter,
   Sparkles,
-  ArrowUpDown,
   Search,
-  SlidersHorizontal,
   Flame,
   Clock,
   Heart,
@@ -13,7 +10,6 @@ import {
   ArrowRight,
   ArrowLeft,
   Smartphone,
-  ChevronDown,
   Film,
 } from 'lucide-react';
 import { Header } from './components/Header';
@@ -25,17 +21,12 @@ import { Pagination } from './components/Pagination';
 import { AuthModal } from './components/AuthModal';
 import { UserProfileModal } from './components/UserProfileModal';
 import { LegalModals } from './components/LegalModals';
-// Lazy load SecretAdminModal to guarantee ZERO bundle overhead for public visitors
-const SecretAdminModal = React.lazy(() =>
-  import('./components/SecretAdminModal').then((m) => ({ default: m.SecretAdminModal }))
-);
 import { Footer } from './components/Footer';
 import { BlogSection } from './components/BlogSection';
 import { MobileLiveSection } from './components/MobileLiveSection';
 import { Wallpaper, Category, Language, User, BlogPost, LegalModalType } from './types';
 import { translations } from './translations';
 import { INITIAL_WALLPAPERS } from './data/initialWallpapers';
-import { INITIAL_BLOG_POSTS } from './data/initialBlogPosts';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import {
   STORAGE_KEYS,
@@ -45,7 +36,6 @@ import {
   safeSaveBlogPosts,
   loadCustomWallpapersFromIndexedDB,
   loadCustomBlogPostsFromIndexedDB,
-  deleteCustomWallpaperFromIndexedDB,
   clearAllCustomWallpapersInIndexedDB,
   permanentlyDeleteWallpaperFromIndexedDB,
   clearAllDeletedWallpaperIds,
@@ -59,6 +49,12 @@ import {
   getGalleryNavigationState,
   restoreGalleryScroll,
 } from './utils/navigationState';
+import { DEFAULT_FALLBACK_IMAGE } from './utils/mediaUtils';
+
+// Lazy load SecretAdminModal to guarantee ZERO bundle overhead for public visitors
+const SecretAdminModal = React.lazy(() =>
+  import('./components/SecretAdminModal').then((m) => ({ default: m.SecretAdminModal }))
+);
 
 export default function App() {
   const location = useLocation();
@@ -67,7 +63,8 @@ export default function App() {
   // 1. Core State
   const [lang, setLang] = useState<Language>(() => {
     try {
-      return (localStorage.getItem(STORAGE_KEYS.LANG) as Language) || 'en';
+      const saved = localStorage.getItem(STORAGE_KEYS.LANG);
+      return (saved === 'en' || saved === 'ar') ? saved : 'en';
     } catch {
       return 'en';
     }
@@ -284,7 +281,9 @@ export default function App() {
     let pageDesc = '';
 
     if (activeWallpaper) {
-      const wpTitle = activeWallpaper.title[lang] || activeWallpaper.title.en;
+      const wpTitle = typeof activeWallpaper.title === 'object' && activeWallpaper.title
+        ? (activeWallpaper.title[lang] || activeWallpaper.title.en || activeWallpaper.title.ar || '')
+        : String(activeWallpaper.title || '');
       pageTitle = `${wpTitle} - 4K Ultra HD Wallpaper · DeskSpace4K`;
       pageDesc =
         lang === 'ar'
@@ -524,7 +523,9 @@ export default function App() {
       const historyItem = {
         id: `dl_${Date.now()}`,
         wallpaperId: wallpaper.id,
-        wallpaperTitle: wallpaper.title[lang] || wallpaper.title.en,
+        wallpaperTitle: typeof wallpaper.title === 'object' && wallpaper.title
+          ? (wallpaper.title[lang] || wallpaper.title.en || wallpaper.title.ar || '')
+          : String(wallpaper.title || ''),
         wallpaperUrl: wallpaper.url,
         resolution: resolutionStr,
         downloadedAt: new Date().toISOString(),
@@ -575,18 +576,20 @@ export default function App() {
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       result = result.filter((w) => {
-        const titleEn = w.title.en.toLowerCase();
-        const titleAr = w.title.ar.toLowerCase();
-        const cat = w.category.toLowerCase();
-        const tags = w.tags.join(' ').toLowerCase();
+        const titleEn = (typeof w.title === 'object' && w.title ? (w.title.en || '') : String(w.title || '')).toLowerCase();
+        const titleAr = (typeof w.title === 'object' && w.title ? (w.title.ar || '') : '').toLowerCase();
+        const cat = (w.category || '').toLowerCase();
+        const tags = Array.isArray(w.tags) ? w.tags.join(' ').toLowerCase() : '';
         return titleEn.includes(q) || titleAr.includes(q) || cat.includes(q) || tags.includes(q);
       });
     }
 
     result.sort((a, b) => {
-      if (sortBy === 'popular') return b.downloads - a.downloads;
-      if (sortBy === 'favorites') return b.favorites - a.favorites;
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      if (sortBy === 'popular') return (b.downloads || 0) - (a.downloads || 0);
+      if (sortBy === 'favorites') return (b.favorites || 0) - (a.favorites || 0);
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
     });
 
     return result;
@@ -1198,42 +1201,55 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {blogPosts.slice(0, 3).map((post) => (
-                  <div
-                    key={post.id}
-                    onClick={() => {
-                      setSelectedCategory('Blog');
-                      navigate('/blog');
-                    }}
-                    className="group p-4 rounded-2xl bg-[#14151C] hover:bg-[#181922] border border-[#232534] hover:border-cyan-500/40 transition-all cursor-pointer flex flex-col justify-between"
-                  >
-                    <div>
-                      <div className="aspect-video w-full rounded-xl overflow-hidden mb-3 bg-black/40">
-                        <img
-                          src={post.coverImage}
-                          alt={post.title[lang] || post.title.en}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                        />
-                      </div>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#1C1E2A] text-cyan-400 border border-cyan-500/20 uppercase tracking-wider">
-                        {post.category}
-                      </span>
-                      <h4 className="text-sm font-bold text-white group-hover:text-cyan-300 transition-colors mt-2 line-clamp-2 leading-snug">
-                        {post.title[lang] || post.title.en}
-                      </h4>
-                      <p className="text-xs text-neutral-400 mt-1.5 line-clamp-2">
-                        {post.excerpt[lang] || post.excerpt.en}
-                      </p>
-                    </div>
+                {blogPosts.slice(0, 3).map((post) => {
+                  const postTitle = typeof post.title === 'object' && post.title
+                    ? (post.title[lang] || post.title.en || post.title.ar || '')
+                    : String(post.title || '');
+                  const postExcerpt = typeof post.excerpt === 'object' && post.excerpt
+                    ? (post.excerpt[lang] || post.excerpt.en || post.excerpt.ar || '')
+                    : String(post.excerpt || '');
 
-                    <div className="mt-4 pt-3 border-t border-[#1E202B] flex items-center justify-between text-[11px] text-neutral-400">
-                      <span>{post.readTimeMinutes || 6} min read</span>
-                      <span className="text-cyan-400 font-semibold group-hover:translate-x-0.5 transition-transform">
-                        {lang === 'ar' ? 'قراءة المقال ←' : 'Read Article →'}
-                      </span>
+                  return (
+                    <div
+                      key={post.id}
+                      onClick={() => {
+                        setSelectedCategory('Blog');
+                        navigate('/blog');
+                      }}
+                      className="group p-4 rounded-2xl bg-[#14151C] hover:bg-[#181922] border border-[#232534] hover:border-cyan-500/40 transition-all cursor-pointer flex flex-col justify-between"
+                    >
+                      <div>
+                        <div className="aspect-video w-full rounded-xl overflow-hidden mb-3 bg-black/40">
+                          <img
+                            src={post.coverImage || DEFAULT_FALLBACK_IMAGE}
+                            alt={postTitle}
+                            loading="lazy"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = DEFAULT_FALLBACK_IMAGE;
+                            }}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                          />
+                        </div>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#1C1E2A] text-cyan-400 border border-cyan-500/20 uppercase tracking-wider">
+                          {post.category}
+                        </span>
+                        <h4 className="text-sm font-bold text-white group-hover:text-cyan-300 transition-colors mt-2 line-clamp-2 leading-snug">
+                          {postTitle}
+                        </h4>
+                        <p className="text-xs text-neutral-400 mt-1.5 line-clamp-2">
+                          {postExcerpt}
+                        </p>
+                      </div>
+
+                      <div className="mt-4 pt-3 border-t border-[#1E202B] flex items-center justify-between text-[11px] text-neutral-400">
+                        <span>{post.readTimeMinutes || 6} min read</span>
+                        <span className="text-cyan-400 font-semibold group-hover:translate-x-0.5 transition-transform">
+                          {lang === 'ar' ? 'قراءة المقال ←' : 'Read Article →'}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </main>
@@ -1295,7 +1311,7 @@ export default function App() {
             onUpdateWallpaper={handleUpdateWallpaper}
             onDeleteWallpaper={handleDeleteWallpaper}
             onResetDefaults={handleResetDefaults}
-            totalDownloads={wallpapers.reduce((sum, w) => sum + w.downloads, 0)}
+            totalDownloads={wallpapers.reduce((sum, w) => sum + (w.downloads || 0), 0)}
             totalUsers={currentUser ? 1 : 0}
             blogPosts={blogPosts}
             onAddBlogPost={handleAddBlogPost}

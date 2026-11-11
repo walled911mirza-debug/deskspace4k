@@ -827,7 +827,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
         const matchingCover = wallpapers.find(
           (w) => w.category === article.category || (w.tags && w.tags.some((t) => t.toLowerCase().includes(article.category.toLowerCase())))
         );
-        const resolvedCover = article.suggestedCoverImage || matchingCover?.thumbnailUrl || matchingCover?.posterUrl || matchingCover?.url || formCoverImage || '/src/assets/images/wallpaper_space_nebula_1792241809155.jpg';
+        const resolvedCover = article.suggestedCoverImage || matchingCover?.thumbnailUrl || matchingCover?.posterUrl || matchingCover?.url || formCoverImage || '/wallpapers/wallpaper_space_nebula_1792241809155.jpg';
 
         const newPost: BlogPost = {
           id: newPostId,
@@ -1747,7 +1747,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
     setFormTitleAr('');
     setFormSlug('');
     setFormCategory('Tech');
-    setFormCoverImage(wallpapers[0]?.url || '/src/assets/images/wallpaper_space_nebula_1792241809155.jpg');
+    setFormCoverImage(wallpapers[0]?.url || '/wallpapers/wallpaper_space_nebula_1792241809155.jpg');
     setFormTags('4K UHD, HDR, Display Optics');
     setFormReadTime(6);
     setFormExcerptEn('');
@@ -1799,7 +1799,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
           en: formContentEn.trim() || formContentAr.trim(),
           ar: formContentAr.trim() || formContentEn.trim(),
         },
-        coverImage: formCoverImage.trim() || wallpapers[0]?.url || '/src/assets/images/wallpaper_space_nebula_1792241809155.jpg',
+        coverImage: formCoverImage.trim() || wallpapers[0]?.url || '/wallpapers/wallpaper_space_nebula_1792241809155.jpg',
         category: formCategory,
         author: {
           name: formAuthorName.trim() || 'DeskSpace Editorial Team',
@@ -3582,9 +3582,20 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                             >
                               <div className="aspect-video rounded-lg overflow-hidden bg-black/60 mb-2 relative">
                                 {q.isVideo ? (
-                                  <video src={q.previewUrl} className="w-full h-full object-cover" muted />
+                                  q.previewUrl && q.previewUrl.trim() !== '' ? (
+                                    <video src={q.previewUrl} className="w-full h-full object-cover" muted />
+                                  ) : (
+                                    <div className="w-full h-full flex items-center justify-center bg-black/60 text-xs text-neutral-500 font-mono">Video</div>
+                                  )
                                 ) : (
-                                  <img src={q.previewUrl} alt={q.name} className="w-full h-full object-cover" />
+                                  <img
+                                    src={q.previewUrl || DEFAULT_FALLBACK_IMAGE}
+                                    alt={q.name}
+                                    onError={(e) => {
+                                      (e.target as HTMLImageElement).src = DEFAULT_FALLBACK_IMAGE;
+                                    }}
+                                    className="w-full h-full object-cover"
+                                  />
                                 )}
                                 <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-black/80 backdrop-blur-md text-[8px] font-mono font-black text-cyan-300 border border-white/10">
                                   {bulkOpt.deviceFormat === 'mobile' ? '📱 9:16' : '🖥️ 16:9'}
@@ -3976,8 +3987,11 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                           >
                             <div className="flex items-center gap-3.5">
                               <img
-                                src={post.coverImage}
+                                src={post.coverImage || DEFAULT_FALLBACK_IMAGE}
                                 alt={post.title.en}
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).src = DEFAULT_FALLBACK_IMAGE;
+                                }}
                                 className="w-16 h-12 object-cover rounded-xl border border-white/10 shrink-0"
                               />
                               <div>
@@ -4108,8 +4122,11 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                             )}
 
                             <img
-                              src={formCoverImage || wallpapers[0]?.url || '/src/assets/images/wallpaper_space_nebula_1792241809155.jpg'}
+                              src={formCoverImage || wallpapers[0]?.posterUrl || wallpapers[0]?.thumbnailUrl || wallpapers[0]?.url || DEFAULT_FALLBACK_IMAGE}
                               alt="Article Featured Cover"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).src = DEFAULT_FALLBACK_IMAGE;
+                              }}
                               className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                             />
                             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex flex-col justify-between p-3 pointer-events-none">

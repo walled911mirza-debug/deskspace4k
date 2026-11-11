@@ -28,7 +28,27 @@ export const AdSenseUnit: React.FC<AdSenseUnitProps> = ({
   adSlotId = 'XXXXXXXXXX',
 }) => {
   const [isLoaded, setIsLoaded] = useState(false);
-  const t = translations[lang];
+  const [isMobileScreen, setIsMobileScreen] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth < 768;
+    }
+    return false;
+  });
+  const t = (translations && (translations[lang] || translations.en)) || {
+    adLabel: 'Advertisement',
+    adSponsored: 'Sponsored Media Slot',
+    adPlaceholderNotice: 'Google AdSense Partner Placement · Responsive Display Unit',
+  };
+
+  // Mobile-First Protection: Never render ad containers or AdChoices placeholders on mobile screens
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobileScreen(window.innerWidth < 768);
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize, { passive: true });
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Smooth loading state to prevent Cumulative Layout Shift (CLS)
   useEffect(() => {
@@ -47,6 +67,11 @@ export const AdSenseUnit: React.FC<AdSenseUnitProps> = ({
 
     return () => clearTimeout(timer);
   }, [slot]);
+
+  // Strictly do not render ad units or AdChoices banners on mobile screens
+  if (isMobileScreen) {
+    return null;
+  }
 
   // Discrete label bar compliant with Google AdSense Publisher Policies
   const adLabelBar = (
@@ -73,7 +98,7 @@ export const AdSenseUnit: React.FC<AdSenseUnitProps> = ({
     return (
       <aside
         aria-label="Sponsored Display Leaderboard"
-        className={`w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 my-10 ${className}`}
+        className={`hidden md:block w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 my-10 ${className}`}
       >
         <div className="relative rounded-2xl bg-[#12131A] border border-[#222433] hover:border-cyan-500/30 transition-all duration-300 overflow-hidden shadow-xl min-h-[110px]">
           {adLabelBar}
@@ -136,7 +161,7 @@ export const AdSenseUnit: React.FC<AdSenseUnitProps> = ({
     return (
       <aside
         aria-label="Sponsored Journal Reading Break"
-        className={`w-full my-8 ${className}`}
+        className={`hidden md:block w-full my-8 ${className}`}
       >
         <div className="relative rounded-2xl bg-[#13141C] border border-[#222535] hover:border-cyan-500/30 transition-all duration-300 overflow-hidden shadow-lg min-h-[100px]">
           {adLabelBar}
@@ -186,7 +211,7 @@ export const AdSenseUnit: React.FC<AdSenseUnitProps> = ({
     return (
       <aside
         aria-label="Sponsored Studio Recommendation"
-        className={`w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 my-6 ${className}`}
+        className={`hidden md:block w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 my-6 ${className}`}
       >
         <div className="relative rounded-2xl bg-[#13141B] border border-[#222533] hover:border-cyan-500/30 transition-all duration-300 overflow-hidden shadow-lg min-h-[90px]">
           {adLabelBar}
@@ -236,7 +261,7 @@ export const AdSenseUnit: React.FC<AdSenseUnitProps> = ({
     return (
       <aside
         aria-label="Sponsored In-Feed Ad Unit"
-        className={`group relative rounded-2xl bg-[#14151C] border border-[#242637] hover:border-cyan-500/40 overflow-hidden shadow-lg flex flex-col justify-between transition-all min-h-[300px] ${className}`}
+        className={`hidden md:block group relative rounded-2xl bg-[#14151C] border border-[#242637] hover:border-cyan-500/40 overflow-hidden shadow-lg flex flex-col justify-between transition-all min-h-[300px] ${className}`}
       >
         {adLabelBar}
 
@@ -289,7 +314,7 @@ export const AdSenseUnit: React.FC<AdSenseUnitProps> = ({
   return (
     <aside
       aria-label="Sponsored Display Banner"
-      className={`w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 my-4 ${className}`}
+      className={`hidden md:block w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 my-4 ${className}`}
     >
       <div className="relative rounded-2xl bg-[#14151B] border border-[#242636] overflow-hidden shadow-sm min-h-[90px]">
         {adLabelBar}

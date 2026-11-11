@@ -117,6 +117,17 @@ async function startServer() {
   const app = express();
   app.use(express.json({ limit: '10mb' }));
 
+  // Serve static files from public directory
+  app.use(express.static(path.resolve(__dirname, 'public')));
+
+  // Static Wallpapers JSON Endpoints for CDN & API Consumers
+  app.get('/wallpapers.json', (_req, res) => {
+    res.sendFile(path.resolve(__dirname, 'public', 'wallpapers.json'));
+  });
+  app.get('/api/wallpapers', (_req, res) => {
+    res.sendFile(path.resolve(__dirname, 'public', 'wallpapers.json'));
+  });
+
   // API Health status
   app.get('/api/health', (_req, res) => {
     res.json({

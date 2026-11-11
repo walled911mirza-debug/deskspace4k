@@ -44,9 +44,11 @@ const WallpaperCardComponent: React.FC<WallpaperCardProps> = ({
   const [fallbackLevel, setFallbackLevel] = useState<number>(0);
   const [hasPermanentError, setHasPermanentError] = useState(false);
 
-  const rawTitle = wallpaper.title[lang] || wallpaper.title.en;
+  const rawTitle = typeof wallpaper.title === 'object' && wallpaper.title
+    ? (wallpaper.title[lang] || wallpaper.title.en || wallpaper.title.ar || '')
+    : String(wallpaper.title || '');
   const currentTitle = cleanWallpaperTitle(rawTitle);
-  const t = translations[lang];
+  const t = (translations && (translations[lang] || translations.en)) || translations.en;
 
   // Clean resolution string without polluting title
   const cleanResolution =
@@ -384,7 +386,7 @@ const WallpaperCardComponent: React.FC<WallpaperCardProps> = ({
         ) : (
           /* High-Resolution Static 4K Poster */
           <img
-            src={currentImgSrc}
+            src={currentImgSrc || getCategoryFallback(wallpaper.category)}
             alt={`${currentTitle} - 4K Ultra HD Desktop Wallpaper (${wallpaper.resolution || '3840×2160'}) - ${wallpaper.category}`}
             loading="lazy"
             decoding="async"

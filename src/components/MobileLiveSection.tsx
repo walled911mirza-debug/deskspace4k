@@ -23,7 +23,6 @@ import { WallpaperCard } from './WallpaperCard';
 import { ErrorBoundary } from './ErrorBoundary';
 import { Pagination } from './Pagination';
 import { EmptyState } from './EmptyState';
-import { AdSenseUnit } from './AdSenseUnit';
 
 interface MobileLiveSectionProps {
   wallpapers: Wallpaper[];
@@ -71,17 +70,15 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
     if (resFilter === '4k') {
       result = result.filter(
         (w) =>
-          w.height >= 2160 ||
-          w.width >= 2160 ||
-          w.resolution.includes('2160') ||
-          w.resolution.includes('4K')
+          (w.height && w.height >= 2160) ||
+          (w.width && w.width >= 2160) ||
+          (w.resolution && (w.resolution.includes('2160') || w.resolution.includes('4K')))
       );
     } else if (resFilter === 'fhd') {
       result = result.filter(
         (w) =>
           (w.width === 1080 && w.height === 1920) ||
-          w.resolution.includes('1080') ||
-          w.resolution.includes('FHD')
+          (w.resolution && (w.resolution.includes('1080') || w.resolution.includes('FHD')))
       );
     }
 
@@ -90,9 +87,9 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
       const tf = topicFilter.toLowerCase();
       result = result.filter((w) => {
         const cat = (w.category || '').toLowerCase();
-        const tags = (w.tags || []).map((t) => t.toLowerCase());
-        const titleEn = (w.title?.en || '').toLowerCase();
-        const titleAr = (w.title?.ar || '').toLowerCase();
+        const tags = (Array.isArray(w.tags) ? w.tags : []).map((t) => (t || '').toLowerCase());
+        const titleEn = (typeof w.title === 'object' && w.title ? (w.title.en || '') : String(w.title || '')).toLowerCase();
+        const titleAr = (typeof w.title === 'object' && w.title ? (w.title.ar || '') : '').toLowerCase();
         return cat === tf || tags.includes(tf) || titleEn.includes(tf) || titleAr.includes(tf);
       });
     }
@@ -101,19 +98,21 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       result = result.filter((w) => {
-        const titleEn = (w.title?.en || '').toLowerCase();
-        const titleAr = (w.title?.ar || '').toLowerCase();
+        const titleEn = (typeof w.title === 'object' && w.title ? (w.title.en || '') : String(w.title || '')).toLowerCase();
+        const titleAr = (typeof w.title === 'object' && w.title ? (w.title.ar || '') : '').toLowerCase();
         const cat = (w.category || '').toLowerCase();
-        const tags = (w.tags || []).join(' ').toLowerCase();
+        const tags = (Array.isArray(w.tags) ? w.tags : []).join(' ').toLowerCase();
         return titleEn.includes(q) || titleAr.includes(q) || cat.includes(q) || tags.includes(q);
       });
     }
 
     // 4. Sort
     result.sort((a, b) => {
-      if (sortBy === 'popular') return b.downloads - a.downloads;
-      if (sortBy === 'favorites') return b.favorites - a.favorites;
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      if (sortBy === 'popular') return (b.downloads || 0) - (a.downloads || 0);
+      if (sortBy === 'favorites') return (b.favorites || 0) - (a.favorites || 0);
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
     });
 
     return result;
@@ -447,9 +446,6 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
             scrollTargetRef={mobileGridTopRef}
           />
         )}
-
-        {/* Non-Intrusive Sponsored Media Break for Mobile View */}
-        <AdSenseUnit slot="gallery-break" lang={lang} />
       </div>
     </div>
   );

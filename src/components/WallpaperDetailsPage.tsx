@@ -177,8 +177,14 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
   const theaterRef = useRef<HTMLDivElement>(null);
   const resDropdownRef = useRef<HTMLDivElement>(null);
 
-  const [previewImgUrl, setPreviewImgUrl] = useState<string>('');
-  const [resolvedVideoSource, setResolvedVideoSource] = useState<string>('');
+  const [previewImgUrl, setPreviewImgUrl] = useState<string>(() => {
+    if (!initialWallpaper) return '';
+    return initialWallpaper.posterUrl || initialWallpaper.thumbnailUrl || initialWallpaper.url || getCategoryFallback(initialWallpaper.category) || '';
+  });
+  const [resolvedVideoSource, setResolvedVideoSource] = useState<string>(() => {
+    if (!initialWallpaper) return '';
+    return initialWallpaper.videoUrl || (isVideoUrl(initialWallpaper.url) ? initialWallpaper.url : '');
+  });
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -246,7 +252,9 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
             isVideoUrl(targetWp.videoUrl))
       );
 
-      const rawTitleStr = targetWp.title[lang] || targetWp.title.en;
+      const rawTitleStr = typeof targetWp.title === 'object' && targetWp.title
+        ? (targetWp.title[lang] || targetWp.title.en || targetWp.title.ar || '')
+        : String(targetWp.title || '');
       const cleanTitleStr = cleanWallpaperTitle(rawTitleStr);
       const rawTarget = targetWp.posterUrl || targetWp.thumbnailUrl || (isLive ? undefined : targetWp.url);
       const initialPreview = getOptimizedPreviewUrl(rawTarget, 1920, targetWp.category);
@@ -312,11 +320,15 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
     };
   }, [routeIdentifier, initialWallpaper?.id, allWallpapers, lang]);
 
-  const t = translations[lang];
+  const t = (translations && (translations[lang] || translations.en)) || translations.en;
 
   // Derived properties from resolved active wallpaper
   const wallpaper = activeWallpaper;
-  const rawTitle = wallpaper ? wallpaper.title[lang] || wallpaper.title.en : '';
+  const rawTitle = wallpaper
+    ? (typeof wallpaper.title === 'object' && wallpaper.title
+        ? (wallpaper.title[lang] || wallpaper.title.en || wallpaper.title.ar || '')
+        : String(wallpaper.title || ''))
+    : '';
   const currentTitle = useMemo(() => cleanWallpaperTitle(rawTitle), [rawTitle]);
 
   // Clean resolution string isolated exclusively from title
@@ -823,29 +835,31 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
             )}
 
             {isVideo ? (
-              <video
-                ref={videoRef}
-                src={resolvedVideoSource}
-                poster={wallpaper.posterUrl || undefined}
-                autoPlay
-                loop
-                muted={isMuted}
-                playsInline
-                preload="none"
-                onLoadedData={() => setImageLoaded(true)}
-                onError={() => {
-                  console.warn(`Video playback error for ${wallpaper.id}, falling back to static 4K image.`);
-                  markUrlAsFailed(resolvedVideoSource);
-                  setVideoError(true);
-                  setPreviewImgUrl(
-                    wallpaper.posterUrl ||
-                      wallpaper.thumbnailUrl ||
-                      getDarkNeonPlaceholder(currentTitle, wallpaper.category)
-                  );
-                }}
-                className="w-full h-full object-contain max-h-[78vh] select-none transform-gpu will-change-transform [transform:translate3d(0,0,0)]"
-              />
-            ) : (
+              resolvedVideoSource && resolvedVideoSource.trim() !== '' ? (
+                <video
+                  ref={videoRef}
+                  src={resolvedVideoSource}
+                  poster={wallpaper.posterUrl || undefined}
+                  autoPlay
+                  loop
+                  muted={isMuted}
+                  playsInline
+                  preload="none"
+                  onLoadedData={() => setImageLoaded(true)}
+                  onError={() => {
+                    console.warn(`Video playback error for ${wallpaper.id}, falling back to static 4K image.`);
+                    markUrlAsFailed(resolvedVideoSource);
+                    setVideoError(true);
+                    setPreviewImgUrl(
+                      wallpaper.posterUrl ||
+                        wallpaper.thumbnailUrl ||
+                        getDarkNeonPlaceholder(currentTitle, wallpaper.category)
+                    );
+                  }}
+                  className="w-full h-full object-contain max-h-[78vh] select-none transform-gpu will-change-transform [transform:translate3d(0,0,0)]"
+                />
+              ) : null
+            ) : previewImgUrl && previewImgUrl.trim() !== '' ? (
               <img
                 src={previewImgUrl}
                 alt={`${currentTitle} - 4K Ultra HD Desktop Wallpaper (${resolutionBadge})`}
@@ -857,7 +871,7 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
                   isZoomed ? 'scale-125' : 'scale-100'
                 }`}
               />
-            )}
+            ) : null}
 
             {/* Subtle Overlay Controls for Video */}
             {isVideo && (
@@ -1394,8 +1408,8 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
         </div>
       </div>
 
-      {/* Non-Intrusive Sponsored Media Break */}
-      <AdSenseUnit slot="details-break" lang={lang} />
+      {/* Non-Intrusive Sponsored Media Break (Hidden on Mobile) */}
+      <AdSenseUnit slot="details-break" lang={lang} className="hidden md:block" />
 
       {/* 6. Related 4K Wallpapers (خلفيات مشابهة مقترحة) */}
       {relatedWallpapers.length > 0 && (
@@ -1424,8 +1438,11 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5">
             {relatedWallpapers.map((rel) => {
-              const relTitle = cleanWallpaperTitle(rel.title[lang] || rel.title.en);
-              const relRes = extractResolutionFromTitle(rel.title[lang] || rel.title.en) || (rel.resolution ? rel.resolution.replace(/\s*[xX]\s*/g, '×').trim() : (isCurrentMobile ? '2160×3840' : '3840×2160'));
+              const relRawTitle = typeof rel.title === 'object' && rel.title
+                ? (rel.title[lang] || rel.title.en || rel.title.ar || '')
+                : String(rel.title || '');
+              const relTitle = cleanWallpaperTitle(relRawTitle);
+              const relRes = extractResolutionFromTitle(relRawTitle) || (rel.resolution ? rel.resolution.replace(/\s*[xX]\s*/g, '×').trim() : (isCurrentMobile ? '2160×3840' : '3840×2160'));
               const relThumb = getOptimizedPreviewUrl(
                 rel.posterUrl || rel.thumbnailUrl || (rel.isLive ? undefined : rel.url),
                 640,

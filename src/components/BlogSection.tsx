@@ -74,6 +74,22 @@ export const BlogSection: React.FC<BlogSectionProps> = ({
 
   const featuredPost = localPosts[0];
 
+  const getPostTitle = (p?: BlogPost | null) => {
+    if (!p) return '';
+    if (typeof p.title === 'object' && p.title) {
+      return p.title[lang] || p.title.en || p.title.ar || '';
+    }
+    return String(p.title || '');
+  };
+
+  const getPostExcerpt = (p?: BlogPost | null) => {
+    if (!p) return '';
+    if (typeof p.excerpt === 'object' && p.excerpt) {
+      return p.excerpt[lang] || p.excerpt.en || p.excerpt.ar || '';
+    }
+    return String(p.excerpt || '');
+  };
+
   const handleClap = (postId: string) => {
     if (clappedArticles.includes(postId)) return;
     setClappedArticles((prev) => [...prev, postId]);
@@ -178,8 +194,8 @@ export const BlogSection: React.FC<BlogSectionProps> = ({
         >
           <div className="lg:col-span-7 relative aspect-video lg:aspect-auto overflow-hidden bg-black/40">
             <img
-              src={featuredPost.coverImage}
-              alt={featuredPost.title[lang] || featuredPost.title.en}
+              src={featuredPost.coverImage || DEFAULT_FALLBACK_IMAGE}
+              alt={getPostTitle(featuredPost)}
               loading="lazy"
               onError={(e) => {
                 (e.target as HTMLImageElement).src = DEFAULT_FALLBACK_IMAGE;
@@ -203,11 +219,11 @@ export const BlogSection: React.FC<BlogSectionProps> = ({
               </div>
 
               <h3 className="text-xl sm:text-2xl font-bold text-white group-hover:text-cyan-300 transition-colors leading-snug">
-                {featuredPost.title[lang] || featuredPost.title.en}
+                {getPostTitle(featuredPost)}
               </h3>
 
               <p className="text-xs sm:text-sm text-neutral-400 line-clamp-3 leading-relaxed">
-                {featuredPost.excerpt[lang] || featuredPost.excerpt.en}
+                {getPostExcerpt(featuredPost)}
               </p>
             </div>
 
@@ -249,8 +265,8 @@ export const BlogSection: React.FC<BlogSectionProps> = ({
             <div>
               <div className="relative aspect-video w-full overflow-hidden bg-black/40">
                 <img
-                  src={post.coverImage}
-                  alt={post.title[lang] || post.title.en}
+                  src={post.coverImage || DEFAULT_FALLBACK_IMAGE}
+                  alt={getPostTitle(post)}
                   loading="lazy"
                   onError={(e) => {
                     (e.target as HTMLImageElement).src = DEFAULT_FALLBACK_IMAGE;
@@ -275,11 +291,11 @@ export const BlogSection: React.FC<BlogSectionProps> = ({
                 </div>
 
                 <h3 className="text-base font-bold text-white group-hover:text-cyan-300 transition-colors line-clamp-2 leading-snug">
-                  {post.title[lang] || post.title.en}
+                  {getPostTitle(post)}
                 </h3>
 
                 <p className="text-xs text-neutral-400 mt-2 line-clamp-2 leading-relaxed">
-                  {post.excerpt[lang] || post.excerpt.en}
+                  {getPostExcerpt(post)}
                 </p>
               </div>
             </div>
@@ -311,8 +327,8 @@ export const BlogSection: React.FC<BlogSectionProps> = ({
         ))}
       </div>
 
-      {/* Non-Intrusive Sponsored Placement Break in Blog Feed */}
-      <AdSenseUnit slot="article-break" lang={lang} />
+      {/* Non-Intrusive Sponsored Placement Break in Blog Feed (Hidden on Mobile) */}
+      <AdSenseUnit slot="article-break" lang={lang} className="hidden md:block" />
 
       {/* FULL ARTICLE READER MODAL */}
       {activeArticle && (
@@ -333,8 +349,8 @@ export const BlogSection: React.FC<BlogSectionProps> = ({
             {/* Article Hero Cover */}
             <div className="relative aspect-[21/9] w-full overflow-hidden bg-black/60">
               <img
-                src={activeArticle.coverImage}
-                alt={activeArticle.title[lang] || activeArticle.title.en}
+                src={activeArticle.coverImage || DEFAULT_FALLBACK_IMAGE}
+                alt={getPostTitle(activeArticle)}
                 onError={(e) => {
                   (e.target as HTMLImageElement).src = DEFAULT_FALLBACK_IMAGE;
                 }}
@@ -361,7 +377,7 @@ export const BlogSection: React.FC<BlogSectionProps> = ({
 
               {/* Title */}
               <h1 className="text-2xl sm:text-4xl font-black text-white tracking-tight leading-tight">
-                {activeArticle.title[lang] || activeArticle.title.en}
+                {getPostTitle(activeArticle)}
               </h1>
 
               {/* Author Card */}
@@ -505,12 +521,19 @@ export const BlogSection: React.FC<BlogSectionProps> = ({
                 (() => {
                   const relatedWp = wallpapers.find((w) => w.id === activeArticle.relatedWallpaperId);
                   if (!relatedWp) return null;
+                  const relTitle = typeof relatedWp.title === 'object' && relatedWp.title
+                    ? (relatedWp.title[lang] || relatedWp.title.en || relatedWp.title.ar || '')
+                    : String(relatedWp.title || '');
+
                   return (
                     <div className="mt-8 p-5 rounded-2xl bg-gradient-to-r from-[#171922] via-[#1E202C] to-[#171922] border border-[#2B2E42] flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
                       <div className="flex items-center gap-4">
                         <img
-                          src={relatedWp.url}
-                          alt={relatedWp.title.en}
+                          src={relatedWp.posterUrl || relatedWp.thumbnailUrl || relatedWp.url || DEFAULT_FALLBACK_IMAGE}
+                          alt={relTitle}
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = DEFAULT_FALLBACK_IMAGE;
+                          }}
                           className="w-24 h-16 object-cover rounded-xl border border-cyan-500/30 shrink-0"
                         />
                         <div>
@@ -519,10 +542,10 @@ export const BlogSection: React.FC<BlogSectionProps> = ({
                             <span>{t.blogRelatedWallpaper}</span>
                           </div>
                           <h4 className="text-sm font-bold text-white mt-0.5">
-                            {relatedWp.title[lang] || relatedWp.title.en}
+                            {relTitle}
                           </h4>
                           <span className="text-[11px] font-mono text-neutral-400">
-                            {relatedWp.resolution} UHD
+                            {relatedWp.resolution || '4K'} UHD
                           </span>
                         </div>
                       </div>
@@ -542,8 +565,8 @@ export const BlogSection: React.FC<BlogSectionProps> = ({
                 })()
               )}
 
-              {/* Natural In-Article Reading Break: Non-Intrusive AdSlot */}
-              <AdSenseUnit slot="article-break" lang={lang} />
+              {/* Natural In-Article Reading Break: Non-Intrusive AdSlot (Hidden on Mobile) */}
+              <AdSenseUnit slot="article-break" lang={lang} className="hidden md:block" />
 
               {/* Article Clap / Engagement Bar */}
               <div className="flex items-center justify-between py-4 border-y border-[#242738]">
