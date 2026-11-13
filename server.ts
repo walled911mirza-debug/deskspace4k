@@ -1,4 +1,5 @@
 import express from 'express';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -17,16 +18,59 @@ const portArgIndex = process.argv.indexOf('--port');
 const portFromArg = portArgIndex !== -1 && process.argv[portArgIndex + 1] ? Number(process.argv[portArgIndex + 1]) : null;
 const PORT = portFromArg || (process.env.PORT && process.env.PORT !== '8080' ? Number(process.env.PORT) : null) || Number(process.env.DEFAULT_APP_PORT) || 3000;
 
-// Initialize Gemini SDK with server-side API Key
+// Initialize Gemini SDK with server-side API Key (guarded to prevent warnings when unconfigured)
 const geminiApiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || '';
-const ai = new GoogleGenAI({
-  apiKey: geminiApiKey,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    },
+const ai = geminiApiKey
+  ? new GoogleGenAI({
+      apiKey: geminiApiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    })
+  : null;
+
+function escapeXml(str: string): string {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function resolveSiteBaseUrl(req: express.Request): string {
+  const configured = process.env.SITE_URL || process.env.APP_URL;
+  if (configured) {
+    return configured.replace(/\/+$/, '');
+  }
+  const protoHeader = req.get('x-forwarded-proto') || req.protocol || 'https';
+  const proto = protoHeader.split(',')[0].trim();
+  const host = req.get('x-forwarded-host') || req.get('host') || 'deskspace4k.com';
+  return `${proto}://${host}`.replace(/\/+$/, '');
+}
+
+const BLOG_SITEMAP_ENTRIES = [
+  {
+    title: 'How to Choose the Best 4K Wallpapers for OLED & IPS Displays to Minimize Eye Strain',
+    caption: 'In-depth guide on display physics, contrast ratios, and chromatic calibration.',
+    coverImage: '/wallpapers/wallpaper_space_nebula_1792241809155.jpg',
+    lastmod: '2026-10-17',
   },
-});
+  {
+    title: 'Optimal Monitor Settings & Dynamic Wallpapers to Boost Workplace Focus',
+    caption: 'Display scaling ratios, color temperature targets, and tranquil dynamic visual anchors.',
+    coverImage: '/wallpapers/wallpaper_nature_mountains_1792241809437.jpg',
+    lastmod: '2026-10-16',
+  },
+  {
+    title: 'Static vs. Animated Live Wallpapers: System Performance Benchmarks',
+    caption: 'Hardware video decoding, VRAM consumption, and frame pacing benchmarks.',
+    coverImage: '/wallpapers/wallpaper_gaming_cyberpunk_1792241811144.jpg',
+    lastmod: '2026-10-15',
+  },
+];
 
 // Strict timeout helper to prevent hanging outbound requests
 function withTimeout<T>(promise: Promise<T>, ms: number = 6000): Promise<T> {
@@ -117,6 +161,124 @@ async function startServer() {
   const app = express();
   app.use(express.json({ limit: '10mb' }));
 
+  // Dynamic SEO Sitemap (includes all pages, categories, and Google Image Sitemap tags)
+  app.get('/sitemap.xml', (req, res) => {
+    try {
+      const baseUrl = resolveSiteBaseUrl(req);
+      const today = new Date().toISOString().split('T')[0];
+
+      let wallpapersList: any[] = [];
+      try {
+        const wallpapersJsonPath = path.resolve(__dirname, 'public', 'wallpapers.json');
+        const raw = fs.readFileSync(wallpapersJsonPath, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          wallpapersList = parsed;
+        }
+      } catch {
+        wallpapersList = [];
+      }
+
+      const toAbsoluteUrl = (mediaPath: string) => {
+        if (!mediaPath) return '';
+        if (mediaPath.startsWith('http://') || mediaPath.startsWith('https://')) return mediaPath;
+        const normalized = mediaPath.startsWith('/') ? mediaPath : `/${mediaPath}`;
+        return `${baseUrl}${normalized}`;
+      };
+
+      const desktopWallpapers = wallpapersList.filter((w) => !w.isMobile && w.deviceFormat !== 'mobile');
+      const mobileWallpapers = wallpapersList.filter((w) => w.isMobile || w.deviceFormat === 'mobile');
+
+      const buildImageNodes = (items: any[]) =>
+        items
+          .map((w) => {
+            const imgUrl = toAbsoluteUrl(w.posterUrl || w.thumbnailUrl || w.url || '');
+            if (!imgUrl) return '';
+            const title = typeof w.title === 'object' ? (w.title.en || w.title.ar || '') : String(w.title || '');
+            const desc = typeof w.description === 'object' ? (w.description.en || '') : String(w.description || '');
+            const caption = `${desc} (${w.resolution || '3840x2160'})`.trim();
+            return `    <image:image>
+      <image:loc>${escapeXml(imgUrl)}</image:loc>
+      <image:title>${escapeXml(title)}</image:title>
+      <image:caption>${escapeXml(caption)}</image:caption>
+    </image:image>`;
+          })
+          .filter(Boolean)
+          .join('\n');
+
+      const blogImageNodes = BLOG_SITEMAP_ENTRIES.map(
+        (b) => `    <image:image>
+      <image:loc>${escapeXml(toAbsoluteUrl(b.coverImage))}</image:loc>
+      <image:title>${escapeXml(b.title)}</image:title>
+      <image:caption>${escapeXml(b.caption)}</image:caption>
+    </image:image>`
+      ).join('\n');
+
+      const wallpaperUrlNodes = wallpapersList
+        .map((w) => {
+          const identifier = encodeURIComponent(w.slug || w.id);
+          const lastmod = w.createdAt ? String(w.createdAt).split('T')[0] : today;
+          const priority = w.isMobile || w.deviceFormat === 'mobile' ? '0.8' : '0.85';
+          const imgNode = buildImageNodes([w]);
+          return `  <url>
+    <loc>${escapeXml(`${baseUrl}/wallpaper/${identifier}`)}</loc>
+    <lastmod>${escapeXml(lastmod)}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>${priority}</priority>
+${imgNode}
+  </url>`;
+        })
+        .join('\n');
+
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>${escapeXml(`${baseUrl}/`)}</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+${buildImageNodes(desktopWallpapers)}
+  </url>
+  <url>
+    <loc>${escapeXml(`${baseUrl}/mobile-live`)}</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.9</priority>
+${buildImageNodes(mobileWallpapers)}
+  </url>
+  <url>
+    <loc>${escapeXml(`${baseUrl}/mobile`)}</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>${escapeXml(`${baseUrl}/blog`)}</loc>
+    <lastmod>2026-10-17</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+${blogImageNodes}
+  </url>
+${wallpaperUrlNodes}
+</urlset>`;
+
+      res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.send(xml);
+    } catch {
+      res.sendFile(path.resolve(__dirname, 'public', 'sitemap.xml'));
+    }
+  });
+
+  // Dynamic robots.txt pointing crawlers to active sitemap URL
+  app.get('/robots.txt', (req, res) => {
+    const baseUrl = resolveSiteBaseUrl(req);
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.send(`User-agent: *\nAllow: /\nDisallow: /secret-admin\nDisallow: /api/\n\nSitemap: ${baseUrl}/sitemap.xml\n`);
+  });
+
   // Serve static files from public directory
   app.use(express.static(path.resolve(__dirname, 'public')));
 
@@ -146,7 +308,7 @@ async function startServer() {
 
     const fallbackData = generateFallbackWallpaperMetadata(category, mediaType, currentTitle);
 
-    if (!geminiApiKey) {
+    if (!geminiApiKey || !ai) {
       return res.json({
         success: true,
         source: 'local_engine',
@@ -230,7 +392,7 @@ Generate:
 
     const fallbackArticle = generateFallbackArticle(topic, category);
 
-    if (!geminiApiKey) {
+    if (!geminiApiKey || !ai) {
       return res.json({
         success: true,
         source: 'local_engine',
@@ -376,7 +538,7 @@ Specifications:
 
     const localMatch = findHeuristicMatch();
 
-    if (!geminiApiKey || wallpapers.length === 0) {
+    if (!geminiApiKey || !ai || wallpapers.length === 0) {
       return res.json({
         success: true,
         source: 'local_heuristic',
@@ -476,7 +638,7 @@ Provide:
       return `### 🛠️ DeskSpace4K Dev Copilot\n\nI analyzed your query: **"${cleanMsg}"**.\n\n- **Platform Context:** DeskSpace4K 4K UHD (3840×2160) & Mobile Live Wallpapers (9:16) Hub.\n- **Architecture:** React 19 SPA, Tailwind CSS v4, Express server proxy, IndexedDB permanent media storage, Gemini 3.8 Flash SDK.\n\nHow can I help you take DeskSpace4K to the next level? I can assist with:\n- Writing custom TypeScript hooks or components\n- Refining Tailwind CSS styling and dark neon battlestation aesthetics\n- Optimizing IndexedDB queries and video hardware decoders\n- Drafting high-CTR metadata or technical journal guides`;
     };
 
-    if (!geminiApiKey) {
+    if (!geminiApiKey || !ai) {
       return res.json({
         success: true,
         source: 'local_copilot_engine',
@@ -647,7 +809,7 @@ Your instructions:
 
     const fallbackResult = generateLocalFallbackAction(cleanPrompt);
 
-    if (!geminiApiKey) {
+    if (!geminiApiKey || !ai) {
       return res.json({
         success: true,
         source: 'local_copilot_engine',
@@ -773,12 +935,35 @@ Classify and generate the structured action.`;
 
   // Client-side SPA catch-all routing
   if (!isProd) {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
+    let viteMiddlewares: express.RequestHandler | null = null;
+    const viteReadyPromise = import('vite')
+      .then(({ createServer: createViteServer }) =>
+        createViteServer({
+          server: {
+            middlewareMode: true,
+            hmr: process.env.DISABLE_HMR === 'true' ? false : undefined,
+          },
+          appType: 'spa',
+        })
+      )
+      .then((vite) => {
+        viteMiddlewares = vite.middlewares;
+        return vite;
+      });
+
+    app.use(async (req, res, next) => {
+      try {
+        if (!viteMiddlewares) {
+          await viteReadyPromise;
+        }
+        if (viteMiddlewares) {
+          return viteMiddlewares(req, res, next);
+        }
+        return next();
+      } catch (err) {
+        return next(err);
+      }
     });
-    app.use(vite.middlewares);
   } else {
     const distPath = path.resolve(__dirname, 'dist');
     app.use(express.static(distPath));

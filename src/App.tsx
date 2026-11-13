@@ -330,6 +330,23 @@ export default function App() {
 
     const ogDesc = document.querySelector('meta[property="og:description"]');
     if (ogDesc) ogDesc.setAttribute('content', pageDesc);
+
+    const canonicalUrl = `${window.location.origin}${window.location.pathname}`;
+    const canonicalEl = document.querySelector('link[rel="canonical"]');
+    if (canonicalEl) canonicalEl.setAttribute('href', canonicalUrl);
+
+    const ogUrl = document.querySelector('meta[property="og:url"]');
+    if (ogUrl) ogUrl.setAttribute('content', canonicalUrl);
+
+    const ogImage = document.querySelector('meta[property="og:image"]');
+    if (ogImage) {
+      const targetImage = activeWallpaper?.posterUrl || activeWallpaper?.thumbnailUrl || activeWallpaper?.url;
+      if (targetImage && !targetImage.startsWith('idb://') && !targetImage.startsWith('data:')) {
+        ogImage.setAttribute('content', targetImage);
+      } else {
+        ogImage.setAttribute('content', '/wallpapers/wallpaper_space_nebula_1792241809155.jpg');
+      }
+    }
   }, [lang, selectedCategory, activeWallpaper, location.pathname]);
 
   // Sync Wallpapers safely to Storage (Guarded against pre-hydration overwriting to protect user data)
