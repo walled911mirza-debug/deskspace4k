@@ -32,6 +32,7 @@ interface MobileLiveSectionProps {
   onOpenDownloadModal: (wallpaper: Wallpaper) => void;
   onOpenDetails: (wallpaper: Wallpaper) => void;
   onBackToDesktop: () => void;
+  isLoading?: boolean;
 }
 
 export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
@@ -42,6 +43,7 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
   onOpenDownloadModal,
   onOpenDetails,
   onBackToDesktop,
+  isLoading = false,
 }) => {
   const [resFilter, setResFilter] = useState<'all' | '4k' | 'fhd'>('all');
   const [topicFilter, setTopicFilter] = useState<string>('all');
@@ -395,7 +397,22 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
       {/* 3. Dedicated 9:16 Portrait Wallpaper Grid */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div ref={mobileGridTopRef} className="scroll-mt-28" />
-        {filteredWallpapers.length === 0 ? (
+        {isLoading ? (
+          <div className="space-y-4">
+            <div className="flex items-center justify-center gap-2 text-xs font-mono text-fuchsia-300 py-2">
+              <div className="w-4 h-4 rounded-full border-2 border-fuchsia-500/30 border-t-fuchsia-400 animate-spin" />
+              <span>{lang === 'ar' ? 'جاري تحميل خلفيات الهاتف الحية...' : 'Loading Mobile Live Wallpapers...'}</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 lg:gap-5">
+              {Array.from({ length: 12 }).map((_, idx) => (
+                <div
+                  key={idx}
+                  className="aspect-[9/16] rounded-2xl bg-[#151224] border border-fuchsia-500/15 animate-pulse"
+                />
+              ))}
+            </div>
+          </div>
+        ) : filteredWallpapers.length === 0 ? (
           <EmptyState
             mode="mobile"
             lang={lang}
@@ -404,7 +421,7 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
             onClearFilters={handleClearFilters}
             onBackToDesktop={onBackToDesktop}
             onOpenAdmin={() => {
-              window.location.href = '/secret-admin';
+              window.location.href = '/admin';
             }}
           />
         ) : (

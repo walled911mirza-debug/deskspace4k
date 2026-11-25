@@ -26,24 +26,22 @@ import { BlogSection } from './components/BlogSection';
 import { MobileLiveSection } from './components/MobileLiveSection';
 import { Wallpaper, Category, Language, User, BlogPost, LegalModalType } from './types';
 import { translations } from './translations';
-import { INITIAL_WALLPAPERS } from './data/initialWallpapers';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { EmptyState } from './components/EmptyState';
 import {
   STORAGE_KEYS,
-  safeLoadWallpapers,
-  safeSaveWallpapers,
   safeLoadBlogPosts,
   safeSaveBlogPosts,
-  loadCustomWallpapersFromIndexedDB,
   loadCustomBlogPostsFromIndexedDB,
-  clearAllCustomWallpapersInIndexedDB,
-  permanentlyDeleteWallpaperFromIndexedDB,
-  clearAllDeletedWallpaperIds,
-  getDeletedWallpaperIds,
   getDeletedBlogPostIds,
   permanentlyDeleteBlogPostFromIndexedDB,
   matchesIdOrSlug,
 } from './utils/storageManager';
+import {
+  fetchWallpapersFromSupabase,
+  incrementWallpaperCounterInSupabase,
+} from './lib/wallpapersService';
+import { isSupabaseConfigured } from './lib/supabase';
 import {
   saveGalleryNavigationState,
   getGalleryNavigationState,
@@ -70,9 +68,9 @@ export default function App() {
     }
   });
 
-  const [wallpapers, setWallpapers] = useState<Wallpaper[]>(() => {
-    return safeLoadWallpapers();
-  });
+  const [wallpapers, setWallpapers] = useState<Wallpaper[]>([]);
+  const [isLoadingWallpapers, setIsLoadingWallpapers] = useState<boolean>(true);
+  const [wallpapersError, setWallpapersError] = useState<string | null>(null);
 
   const [blogPosts, setBlogPosts] = useState<BlogPost[]>(() => {
     return safeLoadBlogPosts();
@@ -96,56 +94,29 @@ export default function App() {
     }
   });
 
-  // 2. Hydrate custom wallpapers and blog posts from IndexedDB (Data Safety Protocol)
-  const isWallpapersHydratedRef = React.useRef(false);
+  const loadWallpapersFromSupabase = useCallback(async () => {
+    setIsLoadingWallpapers(true);
+    setWallpapersError(null);
+    try {
+      const rows = await fetchWallpapersFromSupabase();
+      setWallpapers(rows);
+    } catch (err: any) {
+      console.error('Failed to fetch wallpapers from Supabase:', err);
+      setWallpapersError(
+        err?.message || 'Unable to load wallpapers from Supabase.'
+      );
+    } finally {
+      setIsLoadingWallpapers(false);
+    }
+  }, []);
+
+  // 2. Fetch Wallpapers from Supabase on load & Hydrate Custom Blog Posts
   const isBlogHydratedRef = React.useRef(false);
 
   useEffect(() => {
     let isMounted = true;
 
-    // Hydrate Custom Wallpapers
-    loadCustomWallpapersFromIndexedDB().then((customItems) => {
-      if (!isMounted) return;
-      isWallpapersHydratedRef.current = true;
-      const deletedIds = getDeletedWallpaperIds();
-
-      setWallpapers((prev) => {
-        const prevClean = prev.filter((w) => !deletedIds.has(w.id));
-        if (!customItems || customItems.length === 0) return prevClean;
-
-        const filteredCustom = customItems.filter((w) => !deletedIds.has(w.id));
-        const customMap = new Map(filteredCustom.map((item) => [item.id, item]));
-        let hasChanges = prevClean.length !== prev.length;
-
-        const updated = prevClean.map((item) => {
-          const fromDb = customMap.get(item.id);
-          if (fromDb) {
-            if (
-              fromDb.url !== item.url ||
-              fromDb.posterUrl !== item.posterUrl ||
-              fromDb.videoUrl !== item.videoUrl
-            ) {
-              hasChanges = true;
-            }
-            return {
-              ...item,
-              ...fromDb,
-              url: fromDb.url || item.url,
-              posterUrl: fromDb.posterUrl || item.posterUrl,
-              videoUrl: fromDb.videoUrl || item.videoUrl,
-            };
-          }
-          return item;
-        });
-
-        const existingIds = new Set(prevClean.map((w) => w.id));
-        const missingFromPrev = filteredCustom.filter((w) => !existingIds.has(w.id));
-        if (missingFromPrev.length > 0) hasChanges = true;
-
-        if (!hasChanges) return prevClean;
-        return [...missingFromPrev, ...updated];
-      });
-    });
+    loadWallpapersFromSupabase();
 
     // Hydrate Custom Blog Posts (Data Safety Protocol)
     loadCustomBlogPostsFromIndexedDB().then((customPosts) => {
@@ -185,7 +156,7 @@ export default function App() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [loadWallpapersFromSupabase]);
 
   // Helper to strictly identify Mobile 9:16 Wallpapers
   const isMobileWallpaper = (w: Wallpaper): boolean => {
@@ -241,15 +212,19 @@ export default function App() {
     return 'popular';
   });
 
-  // Direct check for /secret-admin path or hash on initial load
+  // Direct check for /admin or /secret-admin path or hash on initial load
   const isDirectSecretAdmin = () => {
     if (typeof window === 'undefined') return false;
     const rawPath = (window.location.pathname || '').toLowerCase();
     const cleanPath = rawPath.replace(/\/+$/, '');
     const hash = (window.location.hash || '').toLowerCase();
     return (
+      cleanPath === '/admin' ||
+      cleanPath.endsWith('/admin') ||
       cleanPath === '/secret-admin' ||
       cleanPath.endsWith('/secret-admin') ||
+      hash === '#admin' ||
+      hash === '#/admin' ||
       hash === '#secret-admin' ||
       hash === '#/secret-admin' ||
       hash.includes('secret-admin')
@@ -349,11 +324,7 @@ export default function App() {
     }
   }, [lang, selectedCategory, activeWallpaper, location.pathname]);
 
-  // Sync Wallpapers safely to Storage (Guarded against pre-hydration overwriting to protect user data)
-  useEffect(() => {
-    if (!isWallpapersHydratedRef.current) return;
-    safeSaveWallpapers(wallpapers);
-  }, [wallpapers]);
+  // Wallpapers are persisted remotely in Supabase Postgres & Storage
 
   // Sync User to LocalStorage
   useEffect(() => {
@@ -389,10 +360,14 @@ export default function App() {
     const cleanPath = rawPath.replace(/\/+$/, '');
     const hash = (location.hash || window.location.hash || '').toLowerCase();
 
-    // Check if user is navigating directly to secret-admin route or hash
+    // Check if user is navigating directly to admin / secret-admin route or hash
     const isSecretRoute =
+      cleanPath === '/admin' ||
+      cleanPath.endsWith('/admin') ||
       cleanPath === '/secret-admin' ||
       cleanPath.endsWith('/secret-admin') ||
+      hash === '#admin' ||
+      hash === '#/admin' ||
       hash === '#secret-admin' ||
       hash === '#/secret-admin' ||
       hash.includes('secret-admin');
@@ -418,6 +393,7 @@ export default function App() {
       raw !== '/blog' &&
       raw !== '/mobile' &&
       raw !== '/mobile-live' &&
+      raw !== '/admin' &&
       raw !== '/secret-admin' &&
       !raw.startsWith('/wallpaper/')
     ) {
@@ -433,8 +409,12 @@ export default function App() {
       const hash = window.location.hash.toLowerCase();
 
       if (
+        cleanPath === '/admin' ||
+        cleanPath.endsWith('/admin') ||
         cleanPath === '/secret-admin' ||
         cleanPath.endsWith('/secret-admin') ||
+        hash === '#admin' ||
+        hash === '#/admin' ||
         hash === '#secret-admin' ||
         hash === '#/secret-admin' ||
         hash.includes('secret-admin')
@@ -459,12 +439,12 @@ export default function App() {
 
   const handleCloseAdmin = () => {
     setIsAdminModalOpen(false);
-    const currentPath = (location.pathname || window.location.pathname || '').toLowerCase();
+    const currentPath = (location.pathname || window.location.pathname || '').toLowerCase().replace(/\/+$/, '');
     const currentHash = (location.hash || window.location.hash || '').toLowerCase();
 
-    if (currentPath.includes('secret-admin')) {
+    if (currentPath.includes('secret-admin') || currentPath === '/admin' || currentPath.endsWith('/admin')) {
       navigate('/', { replace: true });
-    } else if (currentHash.includes('secret-admin')) {
+    } else if (currentHash.includes('secret-admin') || currentHash.includes('admin')) {
       window.history.replaceState(null, '', location.pathname || '/');
     }
   };
@@ -498,8 +478,12 @@ export default function App() {
 
   // Toggle Favorite
   const handleToggleFavorite = (wallpaperId: string) => {
+    const currentItem = wallpapers.find((w) => w.id === wallpaperId);
+    const currentFavCount = currentItem?.favorites || 0;
+
     if (currentUser) {
       const exists = currentUser.favorites.includes(wallpaperId);
+      const nextCount = Math.max(0, currentFavCount + (exists ? -1 : 1));
       const newFavs = exists
         ? currentUser.favorites.filter((id) => id !== wallpaperId)
         : [...currentUser.favorites, wallpaperId];
@@ -514,8 +498,11 @@ export default function App() {
           w.id === wallpaperId ? { ...w, favorites: Math.max(0, w.favorites + (exists ? -1 : 1)) } : w
         )
       );
+
+      incrementWallpaperCounterInSupabase(wallpaperId, 'favorites', nextCount);
     } else {
       const exists = guestFavorites.includes(wallpaperId);
+      const nextCount = Math.max(0, currentFavCount + (exists ? -1 : 1));
       const newFavs = exists
         ? guestFavorites.filter((id) => id !== wallpaperId)
         : [...guestFavorites, wallpaperId];
@@ -527,14 +514,18 @@ export default function App() {
           w.id === wallpaperId ? { ...w, favorites: Math.max(0, w.favorites + (exists ? -1 : 1)) } : w
         )
       );
+
+      incrementWallpaperCounterInSupabase(wallpaperId, 'favorites', nextCount);
     }
   };
 
   // Record Download
   const handleRecordDownload = (wallpaper: Wallpaper, resolutionStr: string) => {
+    const nextDownloads = (wallpaper.downloads || 0) + 1;
     setWallpapers((prev) =>
       prev.map((w) => (w.id === wallpaper.id ? { ...w, downloads: w.downloads + 1 } : w))
     );
+    incrementWallpaperCounterInSupabase(wallpaper.id, 'downloads', nextDownloads);
 
     if (currentUser) {
       const historyItem = {
@@ -815,7 +806,6 @@ export default function App() {
   }, []);
 
   const handleDeleteWallpaper = useCallback(async (id: string) => {
-    // 1. Immediately synchronize React state so UI updates instantly
     setWallpapers((prev) => prev.filter((w) => w.id !== id));
 
     // Also clean up favorites and download history if this wallpaper was present
@@ -832,21 +822,11 @@ export default function App() {
     });
 
     setGuestFavorites((prev) => prev.filter((fid) => fid !== id));
-
-    // 2. Commit permanent deletion to IndexedDB and mark in deleted store
-    return permanentlyDeleteWallpaperFromIndexedDB(id);
   }, []);
 
   const handleResetDefaults = useCallback(() => {
-    clearAllDeletedWallpaperIds();
-    setWallpapers(INITIAL_WALLPAPERS);
-    try {
-      localStorage.removeItem(STORAGE_KEYS.WALLPAPERS);
-    } catch {
-      // ignore
-    }
-    clearAllCustomWallpapersInIndexedDB().catch(() => {});
-  }, []);
+    loadWallpapersFromSupabase();
+  }, [loadWallpapersFromSupabase]);
 
   // Admin blog management actions
   const handleAddBlogPost = useCallback((newPost: BlogPost) => {
@@ -957,6 +937,7 @@ export default function App() {
               onToggleFavorite={handleToggleFavorite}
               onOpenDownloadModal={(wp) => setDownloadModalWallpaper(wp)}
               onOpenDetails={(wp) => handleOpenWallpaperDetails(wp)}
+              isLoading={isLoadingWallpapers}
               onBackToDesktop={() => {
                 setSelectedCategory('All');
                 navigate('/');
@@ -1133,25 +1114,77 @@ export default function App() {
             </div>
 
             {/* Desktop Wallpaper Grid - 2 columns on mobile, 3 on lg, 4 on xl */}
-            {filteredDesktopWallpapers.length === 0 ? (
-              <div className="py-20 text-center rounded-2xl bg-[#14151B] border border-[#232532] p-8 max-w-md mx-auto">
-                <Search className="w-12 h-12 text-neutral-600 mx-auto mb-3" />
-                <h3 className="text-base font-bold text-white mb-1">
-                  {t.noWallpapersFound}
+            {isLoadingWallpapers ? (
+              <div className="space-y-4">
+                <div className="flex items-center justify-center gap-2.5 text-xs font-mono text-cyan-300 py-2">
+                  <div className="w-4 h-4 rounded-full border-2 border-cyan-500/30 border-t-cyan-400 animate-spin" />
+                  <span>{lang === 'ar' ? 'جاري تحميل الخلفيات من السحابة...' : 'Loading 4K Wallpapers...'}</span>
+                </div>
+                <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-5 lg:gap-6">
+                  {Array.from({ length: 8 }).map((_, idx) => (
+                    <div
+                      key={idx}
+                      className="rounded-2xl bg-[#14151B] border border-[#232532] overflow-hidden animate-pulse"
+                    >
+                      <div className="aspect-video w-full bg-[#1C1E28]" />
+                      <div className="p-3 sm:p-4 space-y-2">
+                        <div className="h-3.5 w-3/4 rounded bg-[#232635]" />
+                        <div className="h-3 w-1/2 rounded bg-[#1C1E28]" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : wallpapersError ? (
+              <div className="py-16 text-center rounded-2xl bg-[#14151B] border border-red-500/30 p-8 max-w-lg mx-auto">
+                <h3 className="text-base font-bold text-white mb-2">
+                  {lang === 'ar' ? 'تعذر تحميل الخلفيات' : 'Unable to Load Wallpapers'}
                 </h3>
-                <p className="text-xs text-neutral-400 mb-4">
-                  Try adjusting your search terms or clearing the current category filters.
-                </p>
+                <p className="text-xs text-red-300/90 mb-5">{wallpapersError}</p>
                 <button
-                  onClick={() => {
-                    setSearchQuery('');
-                    setSelectedCategory('All');
-                  }}
-                  className="px-4 py-2.5 min-h-[44px] rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-xs shadow-md transition-colors cursor-pointer touch-manipulation"
+                  type="button"
+                  onClick={loadWallpapersFromSupabase}
+                  className="px-5 py-2.5 min-h-[44px] rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-xs shadow-md transition-colors cursor-pointer touch-manipulation"
                 >
-                  {t.clearFilters}
+                  {lang === 'ar' ? 'إعادة المحاولة' : 'Retry'}
                 </button>
               </div>
+            ) : filteredDesktopWallpapers.length === 0 ? (
+              !searchQuery.trim() && selectedCategory === 'All' && desktopWallpapers.length === 0 ? (
+                <div className="space-y-4">
+                  {!isSupabaseConfigured && (
+                    <div className="max-w-2xl mx-auto p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs text-center">
+                      {lang === 'ar'
+                        ? 'يرجى ضبط متغيرات البيئة VITE_SUPABASE_URL و VITE_SUPABASE_ANON_KEY للاتصال بقاعدة بيانات Supabase.'
+                        : 'Configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to connect your Supabase database and storage.'}
+                    </div>
+                  )}
+                  <EmptyState
+                    mode="desktop"
+                    lang={lang}
+                    onOpenAdmin={() => setIsAdminModalOpen(true)}
+                  />
+                </div>
+              ) : (
+                <div className="py-20 text-center rounded-2xl bg-[#14151B] border border-[#232532] p-8 max-w-md mx-auto">
+                  <Search className="w-12 h-12 text-neutral-600 mx-auto mb-3" />
+                  <h3 className="text-base font-bold text-white mb-1">
+                    {t.noWallpapersFound}
+                  </h3>
+                  <p className="text-xs text-neutral-400 mb-4">
+                    Try adjusting your search terms or clearing the current category filters.
+                  </p>
+                  <button
+                    onClick={() => {
+                      setSearchQuery('');
+                      setSelectedCategory('All');
+                    }}
+                    className="px-4 py-2.5 min-h-[44px] rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-xs shadow-md transition-colors cursor-pointer touch-manipulation"
+                  >
+                    {t.clearFilters}
+                  </button>
+                </div>
+              )
             ) : (
               <>
                 <ErrorBoundary isSection fallbackTitle={lang === 'ar' ? 'معرض خلفيات سطح المكتب' : 'Desktop 4K Wallpaper Gallery'}>
@@ -1328,6 +1361,7 @@ export default function App() {
             onUpdateWallpaper={handleUpdateWallpaper}
             onDeleteWallpaper={handleDeleteWallpaper}
             onResetDefaults={handleResetDefaults}
+            onRefreshWallpapers={loadWallpapersFromSupabase}
             totalDownloads={wallpapers.reduce((sum, w) => sum + (w.downloads || 0), 0)}
             totalUsers={currentUser ? 1 : 0}
             blogPosts={blogPosts}

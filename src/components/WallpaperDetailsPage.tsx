@@ -52,7 +52,8 @@ import {
 } from '../utils/mediaUtils';
 import { safeResolveMediaUrl, getDarkNeonPlaceholder } from '../utils/safeBlobLoader';
 import { cleanWallpaperTitle, extractResolutionFromTitle } from '../utils/titleSanitizer';
-import { getWallpaperByIdOrSlug, matchesIdOrSlug } from '../utils/storageManager';
+import { matchesIdOrSlug } from '../utils/storageManager';
+import { fetchWallpaperByIdOrSlugFromSupabase } from '../lib/wallpapersService';
 import { AdSenseUnit } from './AdSenseUnit';
 
 interface ResolutionOption {
@@ -290,21 +291,27 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
       return;
     }
 
-    // Dynamic Parameter Extraction & Exact Matching:
-    // Fetch and display the exact record from IndexedDB or state where item.id === routeId or item.slug === routeSlug
+    // Dynamic Parameter Extraction & Exact Matching from Supabase
     setIsLoading(true);
     setNotFound(false);
 
-    getWallpaperByIdOrSlug(routeIdentifier, allWallpapers).then((found) => {
-      if (!isMounted) return;
-      if (!found) {
+    fetchWallpaperByIdOrSlugFromSupabase(routeIdentifier, allWallpapers)
+      .then((found) => {
+        if (!isMounted) return;
+        if (!found) {
+          setActiveWallpaper(null);
+          setIsLoading(false);
+          setNotFound(true);
+          return;
+        }
+        applyWallpaperRecord(found);
+      })
+      .catch(() => {
+        if (!isMounted) return;
         setActiveWallpaper(null);
         setIsLoading(false);
         setNotFound(true);
-        return;
-      }
-      applyWallpaperRecord(found);
-    });
+      });
 
     return () => {
       isMounted = false;
@@ -700,15 +707,15 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
           </h3>
           <p className="text-xs text-neutral-400">
             {lang === 'ar'
-              ? 'يتم فحص السجلات المحلية وقاعدة البيانات...'
-              : `Querying database records for "${routeIdentifier || ''}"...`}
+              ? 'يتم جلب بيانات الخلفية من قاعدة البيانات...'
+              : `Fetching wallpaper record for "${routeIdentifier || ''}"...`}
           </p>
         </div>
       </div>
     );
   }
 
-  // Not Found State (Eliminating any hardcoded or fallback data fetching)
+  // Not Found State
   if (notFound || !wallpaper) {
     return (
       <div className="min-h-screen bg-[#0D0E12] text-[#E2E8F0] flex flex-col selection:bg-cyan-500/25 selection:text-cyan-300">
@@ -735,7 +742,7 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
           <p className="text-xs text-neutral-400 mb-6">
             {lang === 'ar'
               ? `لم يتم العثور على خلفية تطابق المعرف "${routeIdentifier || ''}".`
-              : `No record matching ID or slug "${routeIdentifier || ''}" was found in local storage.`}
+              : `No wallpaper matching ID or slug "${routeIdentifier || ''}" was found.`}
           </p>
           <button
             type="button"
