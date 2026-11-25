@@ -966,9 +966,32 @@ Classify and generate the structured action.`;
     });
   } else {
     const distPath = path.resolve(__dirname, 'dist');
-    app.use(express.static(distPath));
+    const serveHtmlWithRuntimeEnv = (res: express.Response) => {
+      const indexPath = path.resolve(distPath, 'index.html');
+      try {
+        let html = fs.readFileSync(indexPath, 'utf-8');
+        const runtimeEnv = {
+          VITE_SUPABASE_URL: (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '').trim(),
+          VITE_SUPABASE_ANON_KEY: (process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '').trim(),
+        };
+        if (runtimeEnv.VITE_SUPABASE_URL || runtimeEnv.VITE_SUPABASE_ANON_KEY) {
+          const serialized = JSON.stringify(runtimeEnv).replace(/</g, '\\u003c');
+          const envScript = `<script>window.__DESKSPACE_ENV__=${serialized};</script>`;
+          html = html.replace('</head>', `${envScript}</head>`);
+        }
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.send(html);
+      } catch {
+        res.sendFile(indexPath);
+      }
+    };
+
+    app.get(['/', '/index.html'], (_req, res) => {
+      serveHtmlWithRuntimeEnv(res);
+    });
+    app.use(express.static(distPath, { index: false }));
     app.get('*', (_req, res) => {
-      res.sendFile(path.resolve(distPath, 'index.html'));
+      serveHtmlWithRuntimeEnv(res);
     });
   }
 

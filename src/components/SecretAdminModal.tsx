@@ -75,7 +75,7 @@ import {
   cleanupCanvas,
 } from '../admin/utils/memoryHygiene';
 import { AdminDevCopilotWidget } from '../admin/components/AdminDevCopilotWidget';
-import { getSupabaseStatus } from '../lib/supabase';
+import { getSupabaseStatus, logSupabaseDiagnostics } from '../lib/supabase';
 import {
   generateWallpaperId,
   createWallpaperWithSync,
@@ -483,6 +483,13 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
       adminAiClient.terminate();
     };
   }, []);
+
+  // Log clear Supabase configuration diagnostics whenever Admin opens or unlocks
+  useEffect(() => {
+    if (isOpen) {
+      logSupabaseDiagnostics(isAuthenticated ? 'admin-authenticated' : 'admin');
+    }
+  }, [isOpen, isAuthenticated]);
 
   // ==========================================
   // 1. Manual Upload Form State
