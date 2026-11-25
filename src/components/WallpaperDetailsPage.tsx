@@ -52,8 +52,7 @@ import {
 } from '../utils/mediaUtils';
 import { safeResolveMediaUrl, getDarkNeonPlaceholder } from '../utils/safeBlobLoader';
 import { cleanWallpaperTitle, extractResolutionFromTitle } from '../utils/titleSanitizer';
-import { matchesIdOrSlug } from '../utils/storageManager';
-import { fetchWallpaperByIdOrSlugFromSupabase } from '../lib/wallpapersService';
+import { getWallpaperByIdOrSlug, matchesIdOrSlug } from '../utils/storageManager';
 import { AdSenseUnit } from './AdSenseUnit';
 
 interface ResolutionOption {
@@ -253,9 +252,7 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
             isVideoUrl(targetWp.videoUrl))
       );
 
-      const rawTitleStr = typeof targetWp.title === 'object' && targetWp.title
-        ? (targetWp.title[lang] || targetWp.title.en || targetWp.title.ar || '')
-        : String(targetWp.title || '');
+      const rawTitleStr = targetWp.title[lang] || targetWp.title.en;
       const cleanTitleStr = cleanWallpaperTitle(rawTitleStr);
       const rawTarget = targetWp.posterUrl || targetWp.thumbnailUrl || (isLive ? undefined : targetWp.url);
       const initialPreview = getOptimizedPreviewUrl(rawTarget, 1920, targetWp.category);
@@ -291,27 +288,21 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
       return;
     }
 
-    // Dynamic Parameter Extraction & Exact Matching from Supabase
+    // Dynamic Parameter Extraction & Exact Matching:
+    // Fetch and display the exact record from IndexedDB or state where item.id === routeId or item.slug === routeSlug
     setIsLoading(true);
     setNotFound(false);
 
-    fetchWallpaperByIdOrSlugFromSupabase(routeIdentifier, allWallpapers)
-      .then((found) => {
-        if (!isMounted) return;
-        if (!found) {
-          setActiveWallpaper(null);
-          setIsLoading(false);
-          setNotFound(true);
-          return;
-        }
-        applyWallpaperRecord(found);
-      })
-      .catch(() => {
-        if (!isMounted) return;
+    getWallpaperByIdOrSlug(routeIdentifier, allWallpapers).then((found) => {
+      if (!isMounted) return;
+      if (!found) {
         setActiveWallpaper(null);
         setIsLoading(false);
         setNotFound(true);
-      });
+        return;
+      }
+      applyWallpaperRecord(found);
+    });
 
     return () => {
       isMounted = false;
@@ -327,15 +318,11 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
     };
   }, [routeIdentifier, initialWallpaper?.id, allWallpapers, lang]);
 
-  const t = (translations && (translations[lang] || translations.en)) || translations.en;
+  const t = translations[lang];
 
   // Derived properties from resolved active wallpaper
   const wallpaper = activeWallpaper;
-  const rawTitle = wallpaper
-    ? (typeof wallpaper.title === 'object' && wallpaper.title
-        ? (wallpaper.title[lang] || wallpaper.title.en || wallpaper.title.ar || '')
-        : String(wallpaper.title || ''))
-    : '';
+  const rawTitle = wallpaper ? wallpaper.title[lang] || wallpaper.title.en : '';
   const currentTitle = useMemo(() => cleanWallpaperTitle(rawTitle), [rawTitle]);
 
   // Clean resolution string isolated exclusively from title
@@ -707,15 +694,15 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
           </h3>
           <p className="text-xs text-neutral-400">
             {lang === 'ar'
-              ? 'يتم جلب بيانات الخلفية من قاعدة البيانات...'
-              : `Fetching wallpaper record for "${routeIdentifier || ''}"...`}
+              ? 'يتم فحص السجلات المحلية وقاعدة البيانات...'
+              : `Querying database records for "${routeIdentifier || ''}"...`}
           </p>
         </div>
       </div>
     );
   }
 
-  // Not Found State
+  // Not Found State (Eliminating any hardcoded or fallback data fetching)
   if (notFound || !wallpaper) {
     return (
       <div className="min-h-screen bg-[#0D0E12] text-[#E2E8F0] flex flex-col selection:bg-cyan-500/25 selection:text-cyan-300">
@@ -742,7 +729,7 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
           <p className="text-xs text-neutral-400 mb-6">
             {lang === 'ar'
               ? `لم يتم العثور على خلفية تطابق المعرف "${routeIdentifier || ''}".`
-              : `No wallpaper matching ID or slug "${routeIdentifier || ''}" was found.`}
+              : `No record matching ID or slug "${routeIdentifier || ''}" was found in local storage.`}
           </p>
           <button
             type="button"
@@ -1415,8 +1402,8 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
         </div>
       </div>
 
-      {/* Non-Intrusive Sponsored Media Break (Hidden on Mobile) */}
-      <AdSenseUnit slot="details-break" lang={lang} className="hidden md:block" />
+      {/* Non-Intrusive Sponsored Media Break */}
+      <AdSenseUnit slot="details-break" lang={lang} />
 
       {/* 6. Related 4K Wallpapers (خلفيات مشابهة مقترحة) */}
       {relatedWallpapers.length > 0 && (
@@ -1445,11 +1432,8 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5">
             {relatedWallpapers.map((rel) => {
-              const relRawTitle = typeof rel.title === 'object' && rel.title
-                ? (rel.title[lang] || rel.title.en || rel.title.ar || '')
-                : String(rel.title || '');
-              const relTitle = cleanWallpaperTitle(relRawTitle);
-              const relRes = extractResolutionFromTitle(relRawTitle) || (rel.resolution ? rel.resolution.replace(/\s*[xX]\s*/g, '×').trim() : (isCurrentMobile ? '2160×3840' : '3840×2160'));
+              const relTitle = cleanWallpaperTitle(rel.title[lang] || rel.title.en);
+              const relRes = extractResolutionFromTitle(rel.title[lang] || rel.title.en) || (rel.resolution ? rel.resolution.replace(/\s*[xX]\s*/g, '×').trim() : (isCurrentMobile ? '2160×3840' : '3840×2160'));
               const relThumb = getOptimizedPreviewUrl(
                 rel.posterUrl || rel.thumbnailUrl || (rel.isLive ? undefined : rel.url),
                 640,

@@ -1076,27 +1076,26 @@ function sanitizeBlogPostForLocalStorage(post: BlogPost): BlogPost {
 export function safeLoadWallpapers(): Wallpaper[] {
   try {
     const deletedIds = getDeletedWallpaperIds();
-    const baseWallpapers = Array.isArray(INITIAL_WALLPAPERS) ? INITIAL_WALLPAPERS : [];
 
     if (typeof window === 'undefined') {
-      return baseWallpapers.filter((w) => w && w.id && !deletedIds.has(w.id));
+      return INITIAL_WALLPAPERS.filter((w) => !deletedIds.has(w.id));
     }
 
     const raw = localStorage.getItem(STORAGE_KEYS.WALLPAPERS);
     if (!raw) {
-      return baseWallpapers.filter((w) => w && w.id && !deletedIds.has(w.id));
+      return INITIAL_WALLPAPERS.filter((w) => !deletedIds.has(w.id));
     }
 
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed) || parsed.length === 0) {
-      return baseWallpapers.filter((w) => w && w.id && !deletedIds.has(w.id));
+      return INITIAL_WALLPAPERS.filter((w) => !deletedIds.has(w.id));
     }
 
     // Keep actual URLs (Base64 placeholders, direct URLs, bundled assets)
-    // Filter out any permanently deleted wallpapers and guarantee object integrity
+    // Filter out any permanently deleted wallpapers
     const sanitized: Wallpaper[] = parsed
       .filter((w: Wallpaper) => w && w.id && !deletedIds.has(w.id))
-      .map((w: any) => {
+      .map((w: Wallpaper) => {
         const isVid = Boolean(
           w.formatType === 'video' ||
           w.isLive ||
@@ -1106,36 +1105,17 @@ export function safeLoadWallpapers(): Wallpaper[] {
 
         let safeUrl = w.url;
         if (safeUrl && !safeUrl.startsWith('__idb_media__:')) {
-          safeUrl = normalizeMediaUrl(safeUrl, w.category || 'Space');
+          safeUrl = normalizeMediaUrl(safeUrl, w.category);
         }
 
         let safePoster = w.posterUrl;
         if (safePoster && !safePoster.startsWith('__idb_media_poster__:')) {
-          safePoster = normalizeMediaUrl(safePoster, w.category || 'Space');
-        }
-
-        let safeTitle = w.title;
-        if (typeof safeTitle === 'string') {
-          safeTitle = { en: safeTitle, ar: safeTitle };
-        } else if (!safeTitle || typeof safeTitle !== 'object') {
-          safeTitle = { en: '4K Wallpaper', ar: 'خلفية 4K' };
-        } else {
-          safeTitle = {
-            en: safeTitle.en || safeTitle.ar || '4K Wallpaper',
-            ar: safeTitle.ar || safeTitle.en || 'خلفية 4K',
-          };
+          safePoster = normalizeMediaUrl(safePoster, w.category);
         }
 
         return {
           ...w,
-          title: safeTitle,
-          category: w.category || 'Space',
-          resolution: w.resolution || '3840×2160',
-          aspectRatio: w.aspectRatio || (w.deviceFormat === 'mobile' ? '9:16' : '16:9'),
-          tags: Array.isArray(w.tags) ? w.tags : [],
-          downloads: typeof w.downloads === 'number' ? w.downloads : 0,
-          favorites: typeof w.favorites === 'number' ? w.favorites : 0,
-          url: safeUrl || (isVid ? undefined : normalizeMediaUrl(undefined, w.category || 'Space')) || '',
+          url: safeUrl || (isVid ? undefined : normalizeMediaUrl(undefined, w.category)) || '',
           posterUrl: safePoster,
           videoUrl: w.videoUrl || (isVid ? safeUrl : undefined),
         };
@@ -1143,15 +1123,14 @@ export function safeLoadWallpapers(): Wallpaper[] {
 
     // Merge missing initial code wallpapers EXCEPT any that were permanently deleted!
     const savedIds = new Set(sanitized.map((w) => w.id));
-    const missing = baseWallpapers.filter(
-      (w) => w && w.id && !savedIds.has(w.id) && !deletedIds.has(w.id)
+    const missing = INITIAL_WALLPAPERS.filter(
+      (w) => !savedIds.has(w.id) && !deletedIds.has(w.id)
     );
     return [...sanitized, ...missing];
   } catch (error) {
     console.error('Error reading wallpapers from LocalStorage, falling back safely', error);
     const deletedIds = getDeletedWallpaperIds();
-    const baseWallpapers = Array.isArray(INITIAL_WALLPAPERS) ? INITIAL_WALLPAPERS : [];
-    return baseWallpapers.filter((w) => w && w.id && !deletedIds.has(w.id));
+    return INITIAL_WALLPAPERS.filter((w) => !deletedIds.has(w.id));
   }
 }
 
@@ -1194,62 +1173,25 @@ export function safeSaveWallpapers(wallpapers: Wallpaper[]): boolean {
 export function safeLoadBlogPosts(): BlogPost[] {
   try {
     const deletedIds = getDeletedBlogPostIds();
-    const baseBlogPosts = Array.isArray(INITIAL_BLOG_POSTS) ? INITIAL_BLOG_POSTS : [];
 
     if (typeof window === 'undefined') {
-      return baseBlogPosts.filter((p) => p && p.id && !deletedIds.has(p.id));
+      return INITIAL_BLOG_POSTS.filter((p) => !deletedIds.has(p.id));
     }
 
     const raw = localStorage.getItem(STORAGE_KEYS.BLOG_POSTS);
     if (raw !== null) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        return parsed
-          .filter((p: any) => p && p.id && !deletedIds.has(p.id))
-          .map((p: any) => {
-            let safeTitle = p.title;
-            if (typeof safeTitle === 'string') {
-              safeTitle = { en: safeTitle, ar: safeTitle };
-            } else if (!safeTitle || typeof safeTitle !== 'object') {
-              safeTitle = { en: 'DeskSpace Article', ar: 'مقال ديسك سبيس' };
-            } else {
-              safeTitle = {
-                en: safeTitle.en || safeTitle.ar || 'DeskSpace Article',
-                ar: safeTitle.ar || safeTitle.en || 'مقال ديسك سبيس',
-              };
-            }
-
-            let safeExcerpt = p.excerpt;
-            if (typeof safeExcerpt === 'string') {
-              safeExcerpt = { en: safeExcerpt, ar: safeExcerpt };
-            } else if (!safeExcerpt || typeof safeExcerpt !== 'object') {
-              safeExcerpt = { en: '', ar: '' };
-            } else {
-              safeExcerpt = {
-                en: safeExcerpt.en || safeExcerpt.ar || '',
-                ar: safeExcerpt.ar || safeExcerpt.en || '',
-              };
-            }
-
-            return {
-              ...p,
-              title: safeTitle,
-              excerpt: safeExcerpt,
-              category: p.category || 'Tech',
-              readTimeMinutes: typeof p.readTimeMinutes === 'number' ? p.readTimeMinutes : 6,
-              tags: Array.isArray(p.tags) ? p.tags : [],
-            };
-          });
+        return parsed.filter((p: BlogPost) => p && p.id && !deletedIds.has(p.id));
       }
     }
 
     // First visit: initial blog posts minus any that were marked as deleted
-    return baseBlogPosts.filter((p) => p && p.id && !deletedIds.has(p.id));
+    return INITIAL_BLOG_POSTS.filter((p) => !deletedIds.has(p.id));
   } catch (e) {
     console.warn('Failed to parse blog posts from storage, returning clean filtered list', e);
     const deletedIds = getDeletedBlogPostIds();
-    const baseBlogPosts = Array.isArray(INITIAL_BLOG_POSTS) ? INITIAL_BLOG_POSTS : [];
-    return baseBlogPosts.filter((p) => p && p.id && !deletedIds.has(p.id));
+    return INITIAL_BLOG_POSTS.filter((p) => !deletedIds.has(p.id));
   }
 }
 

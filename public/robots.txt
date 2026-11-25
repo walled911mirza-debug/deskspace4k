@@ -1,6 +1,0 @@
-User-agent: *
-Allow: /
-Disallow: /secret-admin
-Disallow: /api/
-
-Sitemap: https://deskspace4k.com/sitemap.xml

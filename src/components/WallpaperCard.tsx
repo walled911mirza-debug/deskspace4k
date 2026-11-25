@@ -44,11 +44,9 @@ const WallpaperCardComponent: React.FC<WallpaperCardProps> = ({
   const [fallbackLevel, setFallbackLevel] = useState<number>(0);
   const [hasPermanentError, setHasPermanentError] = useState(false);
 
-  const rawTitle = typeof wallpaper.title === 'object' && wallpaper.title
-    ? (wallpaper.title[lang] || wallpaper.title.en || wallpaper.title.ar || '')
-    : String(wallpaper.title || '');
+  const rawTitle = wallpaper.title[lang] || wallpaper.title.en;
   const currentTitle = cleanWallpaperTitle(rawTitle);
-  const t = (translations && (translations[lang] || translations.en)) || translations.en;
+  const t = translations[lang];
 
   // Clean resolution string without polluting title
   const cleanResolution =

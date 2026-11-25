@@ -35,9 +35,6 @@ export interface Wallpaper {
   formatType?: 'image' | 'video';
   deviceFormat?: 'desktop' | 'mobile';
   isMobile?: boolean;
-  storagePath?: string;
-  videoStoragePath?: string;
-  posterStoragePath?: string;
 }
 
 export interface User {

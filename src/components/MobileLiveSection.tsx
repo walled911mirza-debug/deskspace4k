@@ -23,6 +23,7 @@ import { WallpaperCard } from './WallpaperCard';
 import { ErrorBoundary } from './ErrorBoundary';
 import { Pagination } from './Pagination';
 import { EmptyState } from './EmptyState';
+import { AdSenseUnit } from './AdSenseUnit';
 
 interface MobileLiveSectionProps {
   wallpapers: Wallpaper[];
@@ -32,7 +33,6 @@ interface MobileLiveSectionProps {
   onOpenDownloadModal: (wallpaper: Wallpaper) => void;
   onOpenDetails: (wallpaper: Wallpaper) => void;
   onBackToDesktop: () => void;
-  isLoading?: boolean;
 }
 
 export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
@@ -43,7 +43,6 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
   onOpenDownloadModal,
   onOpenDetails,
   onBackToDesktop,
-  isLoading = false,
 }) => {
   const [resFilter, setResFilter] = useState<'all' | '4k' | 'fhd'>('all');
   const [topicFilter, setTopicFilter] = useState<string>('all');
@@ -72,15 +71,17 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
     if (resFilter === '4k') {
       result = result.filter(
         (w) =>
-          (w.height && w.height >= 2160) ||
-          (w.width && w.width >= 2160) ||
-          (w.resolution && (w.resolution.includes('2160') || w.resolution.includes('4K')))
+          w.height >= 2160 ||
+          w.width >= 2160 ||
+          w.resolution.includes('2160') ||
+          w.resolution.includes('4K')
       );
     } else if (resFilter === 'fhd') {
       result = result.filter(
         (w) =>
           (w.width === 1080 && w.height === 1920) ||
-          (w.resolution && (w.resolution.includes('1080') || w.resolution.includes('FHD')))
+          w.resolution.includes('1080') ||
+          w.resolution.includes('FHD')
       );
     }
 
@@ -89,9 +90,9 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
       const tf = topicFilter.toLowerCase();
       result = result.filter((w) => {
         const cat = (w.category || '').toLowerCase();
-        const tags = (Array.isArray(w.tags) ? w.tags : []).map((t) => (t || '').toLowerCase());
-        const titleEn = (typeof w.title === 'object' && w.title ? (w.title.en || '') : String(w.title || '')).toLowerCase();
-        const titleAr = (typeof w.title === 'object' && w.title ? (w.title.ar || '') : '').toLowerCase();
+        const tags = (w.tags || []).map((t) => t.toLowerCase());
+        const titleEn = (w.title?.en || '').toLowerCase();
+        const titleAr = (w.title?.ar || '').toLowerCase();
         return cat === tf || tags.includes(tf) || titleEn.includes(tf) || titleAr.includes(tf);
       });
     }
@@ -100,21 +101,19 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       result = result.filter((w) => {
-        const titleEn = (typeof w.title === 'object' && w.title ? (w.title.en || '') : String(w.title || '')).toLowerCase();
-        const titleAr = (typeof w.title === 'object' && w.title ? (w.title.ar || '') : '').toLowerCase();
+        const titleEn = (w.title?.en || '').toLowerCase();
+        const titleAr = (w.title?.ar || '').toLowerCase();
         const cat = (w.category || '').toLowerCase();
-        const tags = (Array.isArray(w.tags) ? w.tags : []).join(' ').toLowerCase();
+        const tags = (w.tags || []).join(' ').toLowerCase();
         return titleEn.includes(q) || titleAr.includes(q) || cat.includes(q) || tags.includes(q);
       });
     }
 
     // 4. Sort
     result.sort((a, b) => {
-      if (sortBy === 'popular') return (b.downloads || 0) - (a.downloads || 0);
-      if (sortBy === 'favorites') return (b.favorites || 0) - (a.favorites || 0);
-      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
+      if (sortBy === 'popular') return b.downloads - a.downloads;
+      if (sortBy === 'favorites') return b.favorites - a.favorites;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
 
     return result;
@@ -397,22 +396,7 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
       {/* 3. Dedicated 9:16 Portrait Wallpaper Grid */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div ref={mobileGridTopRef} className="scroll-mt-28" />
-        {isLoading ? (
-          <div className="space-y-4">
-            <div className="flex items-center justify-center gap-2 text-xs font-mono text-fuchsia-300 py-2">
-              <div className="w-4 h-4 rounded-full border-2 border-fuchsia-500/30 border-t-fuchsia-400 animate-spin" />
-              <span>{lang === 'ar' ? 'جاري تحميل خلفيات الهاتف الحية...' : 'Loading Mobile Live Wallpapers...'}</span>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 lg:gap-5">
-              {Array.from({ length: 12 }).map((_, idx) => (
-                <div
-                  key={idx}
-                  className="aspect-[9/16] rounded-2xl bg-[#151224] border border-fuchsia-500/15 animate-pulse"
-                />
-              ))}
-            </div>
-          </div>
-        ) : filteredWallpapers.length === 0 ? (
+        {filteredWallpapers.length === 0 ? (
           <EmptyState
             mode="mobile"
             lang={lang}
@@ -421,7 +405,7 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
             onClearFilters={handleClearFilters}
             onBackToDesktop={onBackToDesktop}
             onOpenAdmin={() => {
-              window.location.href = '/admin';
+              window.location.href = '/secret-admin';
             }}
           />
         ) : (
@@ -463,6 +447,9 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
             scrollTargetRef={mobileGridTopRef}
           />
         )}
+
+        {/* Non-Intrusive Sponsored Media Break for Mobile View */}
+        <AdSenseUnit slot="gallery-break" lang={lang} />
       </div>
     </div>
   );

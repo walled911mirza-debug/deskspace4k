@@ -1,6 +1,6 @@
 import { Category } from './types';
 
-const baseTranslations = {
+export const translations = {
   en: {
     // Brand
     brandName: 'DeskSpace4K',
@@ -582,16 +582,3 @@ const baseTranslations = {
     saveNow: 'حفظ الآن',
   },
 };
-
-export const translations: typeof baseTranslations = new Proxy(baseTranslations, {
-  get(target, prop: string) {
-    if (prop in target) {
-      return (target as any)[prop];
-    }
-    return target.en;
-  },
-});
-
-export function getTranslation(lang: string) {
-  return (translations as any)[lang] || translations.en;
-}
