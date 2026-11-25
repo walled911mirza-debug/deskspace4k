@@ -42,16 +42,9 @@ import { INITIAL_BLOG_POSTS } from './data/initialBlogPosts';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import {
   STORAGE_KEYS,
-  safeLoadWallpapers,
-  safeSaveWallpapers,
   safeLoadBlogPosts,
   safeSaveBlogPosts,
-  loadCustomWallpapersFromIndexedDB,
   loadCustomBlogPostsFromIndexedDB,
-  clearAllCustomWallpapersInIndexedDB,
-  permanentlyDeleteWallpaperFromIndexedDB,
-  clearAllDeletedWallpaperIds,
-  getDeletedWallpaperIds,
   getDeletedBlogPostIds,
   permanentlyDeleteBlogPostFromIndexedDB,
   matchesIdOrSlug,
@@ -64,7 +57,6 @@ import {
 import { DEFAULT_FALLBACK_IMAGE } from './utils/mediaUtils';
 import {
   fetchWallpapersFromSupabase,
-  deleteWallpaperWithSync,
   syncWallpaperStats,
 } from './lib/wallpapersService';
 
@@ -81,9 +73,7 @@ export default function App() {
     }
   });
 
-  const [wallpapers, setWallpapers] = useState<Wallpaper[]>(() => {
-    return safeLoadWallpapers();
-  });
+  const [wallpapers, setWallpapers] = useState<Wallpaper[]>(() => INITIAL_WALLPAPERS);
 
   const [blogPosts, setBlogPosts] = useState<BlogPost[]>(() => {
     return safeLoadBlogPosts();
@@ -107,13 +97,10 @@ export default function App() {
     }
   });
 
-  // 2. Hydrate custom wallpapers & blog posts from IndexedDB + Supabase Cloud
-  const isWallpapersHydratedRef = React.useRef(false);
+  // 2. Hydrate wallpapers strictly from Supabase public.wallpapers & blog posts from storage
   const isBlogHydratedRef = React.useRef(false);
-  const wallpapersRef = React.useRef<Wallpaper[]>(wallpapers);
-  wallpapersRef.current = wallpapers;
 
-  const [wallpapersLoading, setWallpapersLoading] = useState<boolean>(false);
+  const [wallpapersLoading, setWallpapersLoading] = useState<boolean>(true);
   const [wallpapersError, setWallpapersError] = useState<string | null>(null);
 
   const loadWallpapersFromCloud = useCallback(async () => {
@@ -121,41 +108,21 @@ export default function App() {
     setWallpapersError(null);
     try {
       const res = await fetchWallpapersFromSupabase();
+      if (!res.configured) {
+        setWallpapers([]);
+        setWallpapersError(null);
+        return;
+      }
+
       if (res.error) {
         setWallpapersError(res.error);
+        return;
       }
 
-      if (res.configured && !res.error) {
-        const deletedIds = getDeletedWallpaperIds();
-        const cloudItems = res.wallpapers.filter((w) => !deletedIds.has(w.id));
-
-        setWallpapers((prev) => {
-          const prevClean = prev.filter((w) => !deletedIds.has(w.id));
-          if (cloudItems.length === 0) return prevClean;
-
-          const cloudMap = new Map(cloudItems.map((item) => [item.id, item]));
-          const mergedPrev = prevClean.map((localItem) => {
-            const cloudMatch = cloudMap.get(localItem.id);
-            if (!cloudMatch) return localItem;
-            return {
-              ...localItem,
-              ...cloudMatch,
-              url: cloudMatch.url || localItem.url,
-              videoUrl: cloudMatch.videoUrl || localItem.videoUrl,
-              posterUrl: cloudMatch.posterUrl || localItem.posterUrl,
-              thumbnailUrl: cloudMatch.thumbnailUrl || localItem.thumbnailUrl,
-            };
-          });
-
-          const existingIds = new Set(prevClean.map((w) => w.id));
-          const newFromCloud = cloudItems.filter((w) => !existingIds.has(w.id));
-          return [...newFromCloud, ...mergedPrev];
-        });
-      }
+      setWallpapers(res.wallpapers);
     } catch (err: any) {
       setWallpapersError(err?.message || 'Unable to reach wallpaper database.');
     } finally {
-      isWallpapersHydratedRef.current = true;
       setWallpapersLoading(false);
     }
   }, []);
@@ -163,55 +130,7 @@ export default function App() {
   useEffect(() => {
     let isMounted = true;
 
-    // Hydrate Custom Wallpapers from IndexedDB
-    loadCustomWallpapersFromIndexedDB()
-      .then((customItems) => {
-        if (!isMounted) return;
-        isWallpapersHydratedRef.current = true;
-        const deletedIds = getDeletedWallpaperIds();
-
-        setWallpapers((prev) => {
-          const prevClean = prev.filter((w) => !deletedIds.has(w.id));
-          if (!customItems || customItems.length === 0) return prevClean;
-
-          const filteredCustom = customItems.filter((w) => !deletedIds.has(w.id));
-          const customMap = new Map(filteredCustom.map((item) => [item.id, item]));
-          let hasChanges = prevClean.length !== prev.length;
-
-          const updated = prevClean.map((item) => {
-            const fromDb = customMap.get(item.id);
-            if (fromDb) {
-              if (
-                fromDb.url !== item.url ||
-                fromDb.posterUrl !== item.posterUrl ||
-                fromDb.videoUrl !== item.videoUrl
-              ) {
-                hasChanges = true;
-              }
-              return {
-                ...item,
-                ...fromDb,
-                url: fromDb.url || item.url,
-                posterUrl: fromDb.posterUrl || item.posterUrl,
-                videoUrl: fromDb.videoUrl || item.videoUrl,
-              };
-            }
-            return item;
-          });
-
-          const existingIds = new Set(prevClean.map((w) => w.id));
-          const missingFromPrev = filteredCustom.filter((w) => !existingIds.has(w.id));
-          if (missingFromPrev.length > 0) hasChanges = true;
-
-          if (!hasChanges) return prevClean;
-          return [...missingFromPrev, ...updated];
-        });
-      })
-      .catch(() => {
-        if (isMounted) isWallpapersHydratedRef.current = true;
-      });
-
-    // Hydrate from Supabase public.wallpapers (if configured)
+    // Hydrate strictly from Supabase public.wallpapers
     loadWallpapersFromCloud();
 
     // Hydrate Custom Blog Posts (Data Safety Protocol)
@@ -406,12 +325,6 @@ export default function App() {
     if (ogDesc) ogDesc.setAttribute('content', pageDesc);
   }, [lang, selectedCategory, activeWallpaper, location.pathname]);
 
-  // Sync Wallpapers safely to Storage (Guarded against pre-hydration overwriting to protect user data)
-  useEffect(() => {
-    if (!isWallpapersHydratedRef.current) return;
-    safeSaveWallpapers(wallpapers);
-  }, [wallpapers]);
-
   // Sync User to LocalStorage
   useEffect(() => {
     try {
@@ -555,7 +468,7 @@ export default function App() {
 
   // Toggle Favorite
   const handleToggleFavorite = (wallpaperId: string) => {
-    const target = wallpapersRef.current.find((w) => w.id === wallpaperId);
+    const target = wallpapers.find((w) => w.id === wallpaperId);
     if (currentUser) {
       const exists = currentUser.favorites.includes(wallpaperId);
       const newFavs = exists
@@ -877,12 +790,10 @@ export default function App() {
   }, []);
 
   const handleDeleteWallpaper = useCallback(async (id: string) => {
-    const targetWp = wallpapersRef.current.find((w) => w.id === id);
-
-    // 1. Immediately synchronize React state so UI updates instantly
+    // Synchronize React state after Supabase deletion succeeds
     setWallpapers((prev) => prev.filter((w) => w.id !== id));
 
-    // Also clean up favorites and download history if this wallpaper was present
+    // Clean up favorites and download history if this wallpaper was present
     setCurrentUser((prevUser) => {
       if (!prevUser) return prevUser;
       const hasFav = prevUser.favorites.includes(id);
@@ -896,26 +807,12 @@ export default function App() {
     });
 
     setGuestFavorites((prev) => prev.filter((fid) => fid !== id));
-
-    // 2. Commit permanent deletion to Supabase Storage/Database & IndexedDB
-    try {
-      const res = await deleteWallpaperWithSync(targetWp || id);
-      return res;
-    } catch {
-      return permanentlyDeleteWallpaperFromIndexedDB(id);
-    }
+    return { success: true };
   }, []);
 
   const handleResetDefaults = useCallback(() => {
-    clearAllDeletedWallpaperIds();
-    setWallpapers(INITIAL_WALLPAPERS);
-    try {
-      localStorage.removeItem(STORAGE_KEYS.WALLPAPERS);
-    } catch {
-      // ignore
-    }
-    clearAllCustomWallpapersInIndexedDB().catch(() => {});
-  }, []);
+    loadWallpapersFromCloud();
+  }, [loadWallpapersFromCloud]);
 
   // Admin blog management actions
   const handleAddBlogPost = useCallback((newPost: BlogPost) => {

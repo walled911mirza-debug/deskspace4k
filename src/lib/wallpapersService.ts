@@ -6,13 +6,7 @@ import {
   WALLPAPERS_BUCKET,
   WALLPAPERS_TABLE,
 } from './supabase';
-import {
-  getWallpaperByIdOrSlug as getLocalWallpaperByIdOrSlug,
-  permanentlyDeleteWallpaperFromIndexedDB,
-  saveCustomWallpaperToIndexedDB,
-  slugify,
-  storeBlobInIndexedDB,
-} from '../utils/storageManager';
+import { slugify } from '../utils/storageManager';
 import { isVideoUrl } from '../utils/mediaUtils';
 
 const VALID_CATEGORIES: Category[] = [
@@ -536,7 +530,7 @@ export async function fetchWallpapersFromSupabase(): Promise<FetchWallpapersResu
   if (!supabase || !isSupabaseConfigured) {
     return {
       wallpapers: [],
-      error: null,
+      error: supabaseConfigError || 'Supabase environment variables (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY) are missing or invalid.',
       configured: false,
     };
   }
@@ -567,14 +561,14 @@ export async function fetchWallpapersFromSupabase(): Promise<FetchWallpapersResu
   } catch (err: any) {
     return {
       wallpapers: [],
-      error: err?.message || 'Network error while fetching wallpapers.',
+      error: err?.message || 'Network error while fetching wallpapers from Supabase.',
       configured: true,
     };
   }
 }
 
 /**
- * Fetches a single wallpaper by id or slug from local cache or Supabase public.wallpapers.
+ * Fetches a single wallpaper by id or slug from loaded in-memory candidates or Supabase public.wallpapers.
  */
 export async function fetchWallpaperByIdOrSlug(
   idOrSlug: string,
@@ -585,15 +579,19 @@ export async function fetchWallpaperByIdOrSlug(
   }
 
   const decoded = decodeURIComponent(idOrSlug).trim();
+  const normalizedSlug = slugify(decoded);
 
-  // 1. Check local in-memory / IndexedDB first for instant rendering
-  try {
-    const localFound = await getLocalWallpaperByIdOrSlug(decoded, localCandidates);
-    if (localFound) {
-      return { wallpaper: localFound, error: null };
+  // 1. Check already-loaded in-memory wallpapers first for instant rendering
+  if (Array.isArray(localCandidates) && localCandidates.length > 0) {
+    const inMemoryMatch = localCandidates.find(
+      (w) =>
+        w.id === decoded ||
+        w.slug === decoded ||
+        (normalizedSlug && (w.slug === normalizedSlug || slugify(w.title?.en || '') === normalizedSlug))
+    );
+    if (inMemoryMatch) {
+      return { wallpaper: inMemoryMatch, error: null };
     }
-  } catch {
-    // continue to Supabase query
   }
 
   // 2. Query Supabase public.wallpapers by exact id, then by exact slug
@@ -649,8 +647,9 @@ export interface SaveWallpaperSyncResult {
 }
 
 /**
- * Uploads attached media to the public "wallpapers" bucket (when Supabase is configured),
- * inserts/upserts the record into public.wallpapers, and persists to IndexedDB as local backup.
+ * Strictly uploads attached media to the public "wallpapers" Supabase Storage bucket
+ * and inserts/upserts the record into public.wallpapers.
+ * Fails explicitly if Supabase is unconfigured or if any Storage/DB operation fails.
  */
 export async function createWallpaperWithSync(
   baseWallpaper: Wallpaper,
@@ -661,131 +660,144 @@ export async function createWallpaperWithSync(
     slug: baseWallpaper.slug || slugify(baseWallpaper.title?.en || '') || baseWallpaper.id,
   };
 
-  let storageSynced = false;
-  let syncedToSupabase = false;
-  const warnings: string[] = [];
-
-  // 1. Always preserve local IndexedDB copy if files/dataUrls were provided so admin works offline too
-  try {
-    if (media?.imageFile) {
-      await storeBlobInIndexedDB(finalWp.id, media.imageFile, media.imageFile.name);
-      if (media.thumbnailDataUrl) {
-        await storeBlobInIndexedDB(`${finalWp.id}_thumb`, undefined, 'thumb.jpg', media.thumbnailDataUrl);
-      }
-    } else if (media?.posterDataUrl) {
-      await storeBlobInIndexedDB(finalWp.id, undefined, 'poster.jpg', media.posterDataUrl);
-    }
-
-    if (media?.videoFile) {
-      await storeBlobInIndexedDB(`${finalWp.id}_video`, media.videoFile, media.videoFile.name);
-      if (media.posterDataUrl) {
-        await storeBlobInIndexedDB(`${finalWp.id}_poster`, undefined, 'poster.jpg', media.posterDataUrl);
-      }
-    }
-  } catch (idbErr) {
-    console.warn('IndexedDB local media cache warning:', idbErr);
-  }
-
-  // 2. Upload media to Supabase Storage bucket "wallpapers" if configured
-  if (supabase && isSupabaseConfigured) {
-    let uploadedImageUrl: string | null = null;
-    let uploadedVideoUrl: string | null = null;
-    let uploadedPosterUrl: string | null = null;
-    let uploadedThumbUrl: string | null = null;
-
-    if (media?.imageFile) {
-      const imgRes = await uploadFileToWallpapersBucket(media.imageFile, 'images', media.imageFile.name);
-      if (imgRes.publicUrl) {
-        uploadedImageUrl = imgRes.publicUrl;
-        storageSynced = true;
-      } else if (imgRes.error) {
-        warnings.push(`Image upload: ${imgRes.error}`);
-      }
-    }
-
-    if (media?.videoFile) {
-      const vidRes = await uploadFileToWallpapersBucket(media.videoFile, 'videos', media.videoFile.name);
-      if (vidRes.publicUrl) {
-        uploadedVideoUrl = vidRes.publicUrl;
-        storageSynced = true;
-      } else if (vidRes.error) {
-        warnings.push(`Video upload: ${vidRes.error}`);
-      }
-    }
-
-    if (!uploadedImageUrl && media?.posterDataUrl) {
-      const posterBlob = dataUrlToBlob(media.posterDataUrl);
-      if (posterBlob) {
-        const posterRes = await uploadFileToWallpapersBucket(
-          posterBlob,
-          'posters',
-          `${finalWp.slug || finalWp.id}_poster.jpg`
-        );
-        if (posterRes.publicUrl) {
-          uploadedPosterUrl = posterRes.publicUrl;
-          storageSynced = true;
-        }
-      }
-    }
-
-    if (media?.thumbnailDataUrl && media.thumbnailDataUrl !== media.posterDataUrl) {
-      const thumbBlob = dataUrlToBlob(media.thumbnailDataUrl);
-      if (thumbBlob) {
-        const thumbRes = await uploadFileToWallpapersBucket(
-          thumbBlob,
-          'thumbnails',
-          `${finalWp.slug || finalWp.id}_thumb.jpg`
-        );
-        if (thumbRes.publicUrl) {
-          uploadedThumbUrl = thumbRes.publicUrl;
-          storageSynced = true;
-        }
-      }
-    }
-
-    finalWp = {
-      ...finalWp,
-      url: uploadedImageUrl || uploadedPosterUrl || uploadedVideoUrl || finalWp.url,
-      videoUrl: uploadedVideoUrl || finalWp.videoUrl,
-      posterUrl: uploadedImageUrl || uploadedPosterUrl || finalWp.posterUrl,
-      thumbnailUrl: uploadedThumbUrl || uploadedImageUrl || uploadedPosterUrl || finalWp.thumbnailUrl,
+  if (!supabase || !isSupabaseConfigured) {
+    return {
+      wallpaper: finalWp,
+      syncedToSupabase: false,
+      storageSynced: false,
+      error:
+        supabaseConfigError ||
+        'Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.',
     };
+  }
 
-    // 3. Insert / upsert metadata row into public.wallpapers
-    const row = mapWallpaperToRow(finalWp);
-    const dbRes = await upsertRowResilient(row);
-    if (dbRes.error) {
-      warnings.push(`Database sync: ${dbRes.error}`);
-    } else {
-      syncedToSupabase = true;
-      if (dbRes.data) {
-        const mappedBack = mapRowToWallpaper(dbRes.data);
-        if (mappedBack) {
-          finalWp = {
-            ...finalWp,
-            ...mappedBack,
-            // Preserve local preview thumbnails if DB schema doesn't store them
-            thumbnailUrl: mappedBack.thumbnailUrl || finalWp.thumbnailUrl,
-            posterUrl: mappedBack.posterUrl || finalWp.posterUrl,
-          };
-        }
+  let storageSynced = false;
+  let uploadedImageUrl: string | null = null;
+  let uploadedVideoUrl: string | null = null;
+  let uploadedPosterUrl: string | null = null;
+  let uploadedThumbUrl: string | null = null;
+
+  // 1. Upload media files to Supabase Storage bucket "wallpapers"
+  if (media?.imageFile) {
+    const imgRes = await uploadFileToWallpapersBucket(media.imageFile, 'images', media.imageFile.name);
+    if (!imgRes.publicUrl || imgRes.error) {
+      return {
+        wallpaper: finalWp,
+        syncedToSupabase: false,
+        storageSynced: false,
+        error: `Supabase Storage image upload failed: ${imgRes.error || 'No public URL returned.'}`,
+      };
+    }
+    uploadedImageUrl = imgRes.publicUrl;
+    storageSynced = true;
+  }
+
+  if (media?.videoFile) {
+    const vidRes = await uploadFileToWallpapersBucket(media.videoFile, 'videos', media.videoFile.name);
+    if (!vidRes.publicUrl || vidRes.error) {
+      if (uploadedImageUrl) {
+        await deleteFilesFromWallpapersBucket([uploadedImageUrl]).catch(() => {});
+      }
+      return {
+        wallpaper: finalWp,
+        syncedToSupabase: false,
+        storageSynced: false,
+        error: `Supabase Storage video upload failed: ${vidRes.error || 'No public URL returned.'}`,
+      };
+    }
+    uploadedVideoUrl = vidRes.publicUrl;
+    storageSynced = true;
+  }
+
+  if (!uploadedImageUrl && media?.posterDataUrl) {
+    const posterBlob = dataUrlToBlob(media.posterDataUrl);
+    if (posterBlob) {
+      const posterRes = await uploadFileToWallpapersBucket(
+        posterBlob,
+        'posters',
+        `${finalWp.slug || finalWp.id}_poster.jpg`
+      );
+      if (posterRes.publicUrl) {
+        uploadedPosterUrl = posterRes.publicUrl;
+        storageSynced = true;
       }
     }
   }
 
-  // 4. Persist final record to IndexedDB so local state stays consistent
-  await saveCustomWallpaperToIndexedDB(finalWp).catch(() => false);
+  if (media?.thumbnailDataUrl && media.thumbnailDataUrl !== media.posterDataUrl) {
+    const thumbBlob = dataUrlToBlob(media.thumbnailDataUrl);
+    if (thumbBlob) {
+      const thumbRes = await uploadFileToWallpapersBucket(
+        thumbBlob,
+        'thumbnails',
+        `${finalWp.slug || finalWp.id}_thumb.jpg`
+      );
+      if (thumbRes.publicUrl) {
+        uploadedThumbUrl = thumbRes.publicUrl;
+        storageSynced = true;
+      }
+    }
+  }
+
+  const safeExistingUrl = finalWp.url && !finalWp.url.startsWith('idb://') ? finalWp.url : '';
+  const safeExistingVideoUrl =
+    finalWp.videoUrl && !finalWp.videoUrl.startsWith('idb://') ? finalWp.videoUrl : undefined;
+  const safeExistingPosterUrl =
+    finalWp.posterUrl && !finalWp.posterUrl.startsWith('idb://') ? finalWp.posterUrl : undefined;
+  const safeExistingThumbUrl =
+    finalWp.thumbnailUrl && !finalWp.thumbnailUrl.startsWith('idb://') ? finalWp.thumbnailUrl : undefined;
+
+  finalWp = {
+    ...finalWp,
+    url: uploadedImageUrl || uploadedPosterUrl || uploadedVideoUrl || safeExistingUrl,
+    videoUrl: uploadedVideoUrl || safeExistingVideoUrl,
+    posterUrl: uploadedImageUrl || uploadedPosterUrl || safeExistingPosterUrl,
+    thumbnailUrl: uploadedThumbUrl || uploadedImageUrl || uploadedPosterUrl || safeExistingThumbUrl,
+  };
+
+  if (!finalWp.url) {
+    return {
+      wallpaper: finalWp,
+      syncedToSupabase: false,
+      storageSynced,
+      error: 'No valid media URL was produced after uploading to Supabase Storage.',
+    };
+  }
+
+  // 2. Insert / upsert metadata row into public.wallpapers
+  const row = mapWallpaperToRow(finalWp);
+  const dbRes = await upsertRowResilient(row);
+  if (dbRes.error) {
+    return {
+      wallpaper: finalWp,
+      syncedToSupabase: false,
+      storageSynced,
+      error: `Supabase database insert failed: ${dbRes.error}`,
+    };
+  }
+
+  if (dbRes.data) {
+    const mappedBack = mapRowToWallpaper(dbRes.data);
+    if (mappedBack) {
+      finalWp = {
+        ...finalWp,
+        ...mappedBack,
+        thumbnailUrl: mappedBack.thumbnailUrl || finalWp.thumbnailUrl,
+        posterUrl: mappedBack.posterUrl || finalWp.posterUrl,
+      };
+    }
+  }
 
   return {
     wallpaper: finalWp,
-    syncedToSupabase,
+    syncedToSupabase: true,
     storageSynced,
-    error: warnings.length > 0 ? warnings.join(' | ') : null,
+    error: null,
   };
 }
 
 /**
- * Updates wallpaper metadata in public.wallpapers and IndexedDB.
+ * Strictly updates wallpaper metadata in Supabase public.wallpapers.
  */
 export async function updateWallpaperWithSync(
   wallpaper: Wallpaper
@@ -795,13 +807,13 @@ export async function updateWallpaperWithSync(
     slug: wallpaper.slug || slugify(wallpaper.title?.en || '') || wallpaper.id,
   };
 
-  await saveCustomWallpaperToIndexedDB(normalized).catch(() => false);
-
   if (!supabase || !isSupabaseConfigured) {
     return {
       wallpaper: normalized,
       syncedToSupabase: false,
-      error: null,
+      error:
+        supabaseConfigError ||
+        'Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.',
     };
   }
 
@@ -832,8 +844,7 @@ export async function updateWallpaperWithSync(
 }
 
 /**
- * Deletes wallpaper from Supabase Storage bucket "wallpapers", public.wallpapers table,
- * and local IndexedDB / localStorage.
+ * Strictly deletes wallpaper from Supabase Storage bucket "wallpapers" and public.wallpapers table.
  */
 export async function deleteWallpaperWithSync(
   wallpaperOrId: Wallpaper | string
@@ -843,65 +854,66 @@ export async function deleteWallpaperWithSync(
     return { success: false, syncedToSupabase: false, error: 'Invalid wallpaper ID' };
   }
 
-  let syncedToSupabase = false;
-  const errors: string[] = [];
-
-  if (supabase && isSupabaseConfigured) {
-    try {
-      // Collect storage URLs either from the passed object or from DB row before deletion
-      const candidateUrls: Array<string | undefined | null> = [];
-      if (typeof wallpaperOrId !== 'string') {
-        candidateUrls.push(
-          wallpaperOrId.url,
-          wallpaperOrId.videoUrl,
-          wallpaperOrId.posterUrl,
-          wallpaperOrId.thumbnailUrl
-        );
-      } else {
-        const { data: existingRow } = await supabase
-          .from(WALLPAPERS_TABLE)
-          .select('file_url, video_url, poster_url, thumbnail_url')
-          .eq('id', id)
-          .maybeSingle();
-        if (existingRow) {
-          candidateUrls.push(
-            existingRow.file_url,
-            existingRow.video_url,
-            existingRow.poster_url,
-            existingRow.thumbnail_url
-          );
-        }
-      }
-
-      const storageDel = await deleteFilesFromWallpapersBucket(candidateUrls);
-      if (storageDel.error) {
-        errors.push(`Storage cleanup: ${storageDel.error}`);
-      }
-
-      const { error: dbError } = await supabase
-        .from(WALLPAPERS_TABLE)
-        .delete()
-        .eq('id', id);
-
-      if (dbError) {
-        errors.push(`Database delete: ${dbError.message}`);
-      } else {
-        syncedToSupabase = true;
-      }
-    } catch (err: any) {
-      errors.push(err?.message || 'Unexpected Supabase delete error');
-    }
+  if (!supabase || !isSupabaseConfigured) {
+    return {
+      success: false,
+      syncedToSupabase: false,
+      error:
+        supabaseConfigError ||
+        'Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.',
+    };
   }
 
-  // Always clean up IndexedDB & localStorage deleted registry
-  const localRes = await permanentlyDeleteWallpaperFromIndexedDB(id);
-  if (!localRes.success && localRes.error) {
-    errors.push(localRes.error);
+  const errors: string[] = [];
+  let dbDeleted = false;
+
+  try {
+    const candidateUrls: Array<string | undefined | null> = [];
+    if (typeof wallpaperOrId !== 'string') {
+      candidateUrls.push(
+        wallpaperOrId.url,
+        wallpaperOrId.videoUrl,
+        wallpaperOrId.posterUrl,
+        wallpaperOrId.thumbnailUrl
+      );
+    } else {
+      const { data: existingRow } = await supabase
+        .from(WALLPAPERS_TABLE)
+        .select('file_url, video_url, poster_url, thumbnail_url')
+        .eq('id', id)
+        .maybeSingle();
+      if (existingRow) {
+        candidateUrls.push(
+          existingRow.file_url,
+          existingRow.video_url,
+          existingRow.poster_url,
+          existingRow.thumbnail_url
+        );
+      }
+    }
+
+    const storageDel = await deleteFilesFromWallpapersBucket(candidateUrls);
+    if (storageDel.error) {
+      errors.push(`Storage delete failed: ${storageDel.error}`);
+    }
+
+    const { error: dbError } = await supabase
+      .from(WALLPAPERS_TABLE)
+      .delete()
+      .eq('id', id);
+
+    if (dbError) {
+      errors.push(`Database delete failed: ${dbError.message}`);
+    } else {
+      dbDeleted = true;
+    }
+  } catch (err: any) {
+    errors.push(err?.message || 'Unexpected Supabase delete error');
   }
 
   return {
-    success: errors.length === 0 || localRes.success,
-    syncedToSupabase,
+    success: dbDeleted && errors.length === 0,
+    syncedToSupabase: dbDeleted && errors.length === 0,
     error: errors.length > 0 ? errors.join(' | ') : null,
   };
 }

@@ -58,15 +58,9 @@ import {
   isVideoUrl,
 } from '../utils/mediaUtils';
 import {
-  safeSaveWallpapers,
   safeSaveBlogPosts,
   storeBlobInIndexedDB,
-  saveCustomWallpaperToIndexedDB,
-  saveAllCustomWallpapersToIndexedDB,
   saveCustomBlogPostToIndexedDB,
-  deleteCustomWallpaperFromIndexedDB,
-  deleteMediaFromIndexedDB,
-  permanentlyDeleteWallpaperFromIndexedDB,
   permanentlyDeleteBlogPostFromIndexedDB,
   deleteCustomBlogPostFromIndexedDB,
   getDeletedBlogPostIds,
@@ -532,6 +526,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
   const [globalIsLive, setGlobalIsLive] = useState<boolean>(true);
   const [bulkPublishing, setBulkPublishing] = useState<boolean>(false);
   const [bulkNotice, setBulkNotice] = useState<string | null>(null);
+  const [bulkNoticeType, setBulkNoticeType] = useState<'success' | 'error'>('success');
   const bulkFileInputRef = useRef<HTMLInputElement>(null);
 
   // ==========================================
@@ -547,6 +542,8 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
   const [editTags, setEditTags] = useState<string>('');
   const [editDescEn, setEditDescEn] = useState<string>('');
   const [editDescAr, setEditDescAr] = useState<string>('');
+  const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
+  const [editError, setEditError] = useState<string | null>(null);
   const [wallpaperToDeleteId, setWallpaperToDeleteId] = useState<string | null>(null);
   const [isDeletingWallpaper, setIsDeletingWallpaper] = useState<boolean>(false);
   const [manageNotice, setManageNotice] = useState<string | null>(null);
@@ -755,38 +752,19 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
     onClose();
   };
 
-  // Master Persistence Handler
-  const handleMasterSaveChanges = async () => {
-    try {
-      safeSaveWallpapers(wallpapers);
-      safeSaveBlogPosts(blogPosts);
-      await saveAllCustomWallpapersToIndexedDB(wallpapers);
-      if (supabaseStatus.configured && onRefreshFromCloud) {
-        setIsCloudSyncing(true);
-        await onRefreshFromCloud();
-        setIsCloudSyncing(false);
-      }
-      setMasterSaveToast(
-        lang === 'ar'
-          ? 'تم حفظ وتثبيت جميع التعديلات والخلفيات والمقالات ومزامنتها بنجاح!'
-          : 'All changes, wallpapers, and articles saved and synced successfully!'
-      );
-    } catch (err) {
-      console.warn('Storage sync notice during save', err);
-      setIsCloudSyncing(false);
-      setMasterSaveToast(
-        lang === 'ar'
-          ? 'تم الحفظ بنجاح في الذاكرة الحالية ومزامنة البيانات!'
-          : 'Data successfully synchronized in current state!'
-      );
-    }
-    setTimeout(() => {
-      setMasterSaveToast(null);
-    }, 4000);
-  };
-
   const handleSyncCloudNow = async () => {
-    if (!onRefreshFromCloud || isCloudSyncing) return;
+    if (isCloudSyncing) return;
+    if (!supabaseStatus.configured) {
+      setMasterSaveToast(
+        supabaseStatus.error ||
+          (lang === 'ar'
+            ? 'تعذر المزامنة: متغيرات بيئة Supabase (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY) غير مضبوطة.'
+            : 'Cannot sync: VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY is missing or invalid.')
+      );
+      setTimeout(() => setMasterSaveToast(null), 4500);
+      return;
+    }
+    if (!onRefreshFromCloud) return;
     setIsCloudSyncing(true);
     try {
       await onRefreshFromCloud();
@@ -795,11 +773,12 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
           ? 'تمت مزامنة البيانات مع Supabase بنجاح!'
           : 'Synced latest wallpapers from Supabase!'
       );
-    } catch {
+    } catch (err: any) {
       setMasterSaveToast(
-        lang === 'ar'
-          ? 'تعذر الاتصال بقاعدة بيانات Supabase حالياً.'
-          : 'Could not reach Supabase right now.'
+        err?.message ||
+          (lang === 'ar'
+            ? 'تعذر الاتصال بقاعدة بيانات Supabase حالياً.'
+            : 'Could not reach Supabase right now.')
       );
     } finally {
       setIsCloudSyncing(false);
@@ -837,8 +816,8 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
       setCopilotToast({
         type: 'info',
         message: lang === 'ar'
-          ? `قام مساعد الذكاء الاصطناعي بإعداد الإجراء: ${res.summaryAr || res.summaryEn}. راجع الخطة بالأسفل ثم اضغط "تنفيذ وحفظ في IndexedDB".`
-          : `AI Copilot prepared: ${res.summaryEn}. Review details below and click "Execute & Save to IndexedDB".`,
+          ? `قام مساعد الذكاء الاصطناعي بإعداد الإجراء: ${res.summaryAr || res.summaryEn}. راجع الخطة بالأسفل ثم اضغط "تنفيذ ومزامنة التعديلات".`
+          : `AI Copilot prepared: ${res.summaryEn}. Review details below and click "Execute & Sync Changes".`,
       });
     } catch (err: any) {
       console.error('Failed to run copilot action:', err);
@@ -934,6 +913,10 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
         setCopilotPrompt('');
 
       } else if (actionType === 'BATCH_UPDATE_TAGS') {
+        if (!supabaseStatus.configured) {
+          throw new Error(supabaseStatus.error || 'Supabase is not configured. Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY.');
+        }
+
         const updateData = copilotResult.tagUpdateData;
         if (!updateData || !Array.isArray(updateData.tagsToAdd) || updateData.tagsToAdd.length === 0) {
           throw new Error('No tag updates found');
@@ -943,7 +926,6 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
         const tagsToAdd = updateData.tagsToAdd.map((t) => t.trim()).filter(Boolean);
 
         let updatedCount = 0;
-        // Strictly targeted update on matching wallpapers only
         for (const wp of wallpapers) {
           const isTarget = targetCat === 'All' || (wp.category || '').toLowerCase() === targetCat.toLowerCase();
           if (isTarget) {
@@ -955,6 +937,9 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                 tags: merged,
               };
               const syncRes = await updateWallpaperWithSync(updatedWp);
+              if (syncRes.error || !syncRes.syncedToSupabase) {
+                throw new Error(syncRes.error || 'Failed to sync tag update to Supabase.');
+              }
               onUpdateWallpaper(syncRes.wallpaper);
               updatedCount++;
             }
@@ -968,8 +953,8 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
             prompt: copilotPrompt,
             actionType: 'BATCH_UPDATE_TAGS',
             summary: lang === 'ar'
-              ? `تحديث وسوم ${updatedCount} خلفية بإضافة [${tagsToAdd.join(', ')}]`
-              : `Batch updated tags on ${updatedCount} wallpapers [${tagsToAdd.join(', ')}]`,
+              ? `تحديث وسوم ${updatedCount} خلفية في Supabase [${tagsToAdd.join(', ')}]`
+              : `Batch updated tags on ${updatedCount} wallpapers in Supabase [${tagsToAdd.join(', ')}]`,
             affectedCount: updatedCount,
           },
           ...prev,
@@ -978,13 +963,17 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
         setCopilotToast({
           type: 'success',
           message: lang === 'ar'
-            ? `✅ تم تحديث وسوم ${updatedCount} خلفية بنجاح وحفظها في IndexedDB! لم يتم إعادة تعيين قاعدة البيانات أو حذف أي وسائط.`
-            : `✅ Successfully batch updated tags for ${updatedCount} wallpapers! Zero storage resets performed.`,
+            ? `✅ تم تحديث وسوم ${updatedCount} خلفية بنجاح ومزامنتها في Supabase!`
+            : `✅ Successfully batch updated tags for ${updatedCount} wallpapers in Supabase!`,
         });
         setCopilotResult(null);
         setCopilotPrompt('');
 
       } else if (actionType === 'UPDATE_METADATA') {
+        if (!supabaseStatus.configured) {
+          throw new Error(supabaseStatus.error || 'Supabase is not configured. Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY.');
+        }
+
         const metaData = copilotResult.metadataUpdateData;
         if (!metaData) {
           throw new Error('No metadata update payload provided');
@@ -1012,6 +1001,9 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
               },
             };
             const syncRes = await updateWallpaperWithSync(updatedWp);
+            if (syncRes.error || !syncRes.syncedToSupabase) {
+              throw new Error(syncRes.error || 'Failed to sync metadata update to Supabase.');
+            }
             onUpdateWallpaper(syncRes.wallpaper);
             updatedCount++;
           }
@@ -1024,8 +1016,8 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
             prompt: copilotPrompt,
             actionType: 'UPDATE_METADATA',
             summary: lang === 'ar'
-              ? `تحديث البيانات الوصفية لـ ${updatedCount} خلفية (${targetCat})`
-              : `Updated metadata for ${updatedCount} wallpapers (${targetCat})`,
+              ? `تحديث البيانات الوصفية لـ ${updatedCount} خلفية في Supabase (${targetCat})`
+              : `Updated metadata for ${updatedCount} wallpapers in Supabase (${targetCat})`,
             affectedCount: updatedCount,
           },
           ...prev,
@@ -1034,8 +1026,8 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
         setCopilotToast({
           type: 'success',
           message: lang === 'ar'
-            ? `✅ تم تحديث البيانات الوصفية لـ ${updatedCount} خلفية بنجاح وحفظها في IndexedDB!`
-            : `✅ Successfully updated metadata for ${updatedCount} wallpapers in IndexedDB!`,
+            ? `✅ تم تحديث البيانات الوصفية لـ ${updatedCount} خلفية بنجاح في Supabase!`
+            : `✅ Successfully updated metadata for ${updatedCount} wallpapers in Supabase!`,
         });
         setCopilotResult(null);
         setCopilotPrompt('');
@@ -1243,6 +1235,18 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
       return;
     }
 
+    if (!supabaseStatus.configured) {
+      setManualNotice({
+        type: 'error',
+        message:
+          supabaseStatus.error ||
+          (lang === 'ar'
+            ? 'تعذر النشر: إعدادات Supabase (VITE_SUPABASE_URL و VITE_SUPABASE_ANON_KEY) غير متوفرة.'
+            : 'Upload blocked: Missing or invalid VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY. Configure Supabase to publish wallpapers.'),
+      });
+      return;
+    }
+
     setManualPublishing(true);
     setManualNotice(null);
 
@@ -1250,10 +1254,6 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
       const wpId = generateWallpaperId();
       const isMobileFormat = manualDeviceFormat === 'mobile';
       const isLive = Boolean(manualVideoFile || manualIsLive || isMobileFormat);
-
-      const finalImageUrl = `idb://media/${wpId}`;
-      const finalThumbnailUrl = manualImageThumbnail || manualVideoPoster || undefined;
-      const finalVideoUrl = manualVideoFile ? `idb://media/${wpId}_video` : undefined;
 
       // Parse tags
       let parsedTags = manualTags
@@ -1312,10 +1312,10 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
         resolution: manualResolution || `${width}×${height}`,
         width,
         height,
-        url: finalImageUrl,
-        videoUrl: finalVideoUrl,
-        posterUrl: manualImageFile ? finalImageUrl : (manualVideoPoster || undefined),
-        thumbnailUrl: finalThumbnailUrl || finalImageUrl,
+        url: '',
+        videoUrl: undefined,
+        posterUrl: undefined,
+        thumbnailUrl: undefined,
         formatType: isLive ? 'video' : 'image',
         aspectRatio: finalAspectRatio,
         deviceFormat: isMobileFormat ? 'mobile' : 'desktop',
@@ -1329,7 +1329,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
         isLive,
       };
 
-      // Persist to IndexedDB + upload to Supabase Storage "wallpapers" bucket & public.wallpapers table
+      // Strictly upload media to Supabase Storage "wallpapers" bucket & insert into public.wallpapers
       const syncRes = await createWallpaperWithSync(baseWallpaper, {
         imageFile: manualImageFile,
         videoFile: manualVideoFile,
@@ -1337,7 +1337,19 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
         thumbnailDataUrl: manualImageThumbnail,
       });
 
-      // Update memory state in App
+      if (!syncRes.syncedToSupabase || syncRes.error) {
+        setManualNotice({
+          type: 'error',
+          message:
+            syncRes.error ||
+            (lang === 'ar'
+              ? 'فشل رفع أو حفظ الخلفية في Supabase. يرجى التحقق من الاتصال والصلاحيات.'
+              : 'Failed to upload or save wallpaper to Supabase. Please check your bucket and table permissions.'),
+        });
+        return;
+      }
+
+      // Update memory state in App only after Supabase confirms
       onAddWallpapers([syncRes.wallpaper]);
 
       // Reset form
@@ -1349,18 +1361,12 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
       setManualDescAr('');
       setManualTags(isMobileFormat ? 'Mobile Live Wallpapers, 9:16 Vertical, 60 FPS, OLED Black, Smartphone' : '4K Ultra HD, Desktop, OLED Black');
 
-      const syncDetail = syncRes.syncedToSupabase
-        ? (lang === 'ar' ? 'ومزامنتها مع Supabase!' : 'and synced to Supabase Storage & DB!')
-        : syncRes.error
-        ? (lang === 'ar' ? `(حُفظت محلياً؛ تنبيه السحابة: ${syncRes.error})` : `(Saved locally; cloud sync notice: ${syncRes.error})`)
-        : (lang === 'ar' ? 'في التخزين المحلي (IndexedDB)!' : 'to local persistent storage (IndexedDB)!');
-
       setManualNotice({
         type: 'success',
         message:
           lang === 'ar'
-            ? `تم رفع وحفظ الخلفية "${titleAr}" بنجاح في قسم ${isMobileFormat ? 'خلفيات الهاتف الحية' : 'خلفيات سطح المكتب'} ${syncDetail}`
-            : `Wallpaper "${titleEn}" published to ${isMobileFormat ? 'Mobile Live Wallpapers' : 'Desktop 4K'} ${syncDetail}`,
+            ? `تم رفع وحفظ الخلفية "${titleAr}" بنجاح في Supabase (${isMobileFormat ? 'خلفيات الهاتف الحية' : 'خلفيات سطح المكتب'})!`
+            : `Wallpaper "${titleEn}" uploaded to Supabase Storage & saved to public.wallpapers (${isMobileFormat ? 'Mobile Live' : 'Desktop 4K'})!`,
       });
 
       setTimeout(() => {
@@ -1373,8 +1379,8 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
         type: 'error',
         message:
           lang === 'ar'
-            ? `حدث خطأ أثناء حفظ الخلفية: ${err?.message || 'خطأ غير متوقع'}`
-            : `Error saving wallpaper: ${err?.message || 'Unexpected error'}`,
+            ? `حدث خطأ أثناء الرفع إلى Supabase: ${err?.message || 'خطأ غير متوقع'}`
+            : `Supabase upload error: ${err?.message || 'Unexpected error'}`,
       });
     } finally {
       setManualPublishing(false);
@@ -1410,14 +1416,11 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
       const name = cleanWallpaperTitle(file.name);
       const size = `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
 
-      // Immediately cache raw file into IndexedDB
-      storeBlobInIndexedDB(qId, file, file.name);
-
       const item: QueuedFile = {
         id: qId,
         file,
         previewUrl,
-        persistentUrl: `idb://media/${qId}`,
+        persistentUrl: '',
         name,
         size,
         sourceType: 'file',
@@ -1449,7 +1452,20 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
 
   const handlePublishBulkBatch = async () => {
     if (queuedFiles.length === 0 || bulkPublishing) return;
+
+    if (!supabaseStatus.configured) {
+      setBulkNoticeType('error');
+      setBulkNotice(
+        supabaseStatus.error ||
+          (lang === 'ar'
+            ? 'تعذر رفع الدفعة: متغيرات Supabase (VITE_SUPABASE_URL و VITE_SUPABASE_ANON_KEY) غير مضبوطة.'
+            : 'Batch upload blocked: Missing or invalid VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY.')
+      );
+      return;
+    }
+
     setBulkPublishing(true);
+    setBulkNotice(null);
 
     try {
       const parsedTags = globalTags
@@ -1466,8 +1482,9 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
       const batchAspectRatio = isMobileBatch ? '9:16' : '16:9';
 
       const publishedWallpapers: Wallpaper[] = [];
-      let cloudSyncedCount = 0;
-      let firstSyncWarning: string | null = null;
+      const succeededIds = new Set<string>();
+      let failedCount = 0;
+      let firstSyncError: string | null = null;
 
       for (let index = 0; index < queuedFiles.length; index++) {
         const item = queuedFiles[index];
@@ -1477,10 +1494,6 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
         const wpId = item.id || generateWallpaperId();
         const titleEn = cleanName || (isMobileBatch ? `Mobile Live ${batchCategory} ${index + 1}` : `4K Wallpaper ${index + 1}`);
         const titleAr = cleanName || (isMobileBatch ? `خلفية هاتف حية ${batchCategory} ${index + 1}` : `خلفية شاشة 4K ${index + 1}`);
-
-        const finalMediaUrl = item.isVideo ? `idb://media/${wpId}_video` : `idb://media/${wpId}`;
-        const finalPoster =
-          item.posterUrl || item.thumbnailUrl || (item.isVideo ? getCategoryFallback(batchCategory) : `idb://media/${wpId}`);
 
         const defaultTags = isMobileBatch
           ? ['Mobile Live Wallpapers', '9:16 Vertical', batchCategory, '60 FPS']
@@ -1502,10 +1515,10 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
           resolution: detectedRes,
           width: batchWidth,
           height: batchHeight,
-          url: finalMediaUrl,
-          videoUrl: isLiveItem ? finalMediaUrl : undefined,
-          posterUrl: finalPoster,
-          thumbnailUrl: item.thumbnailUrl || item.posterUrl || finalPoster,
+          url: '',
+          videoUrl: undefined,
+          posterUrl: undefined,
+          thumbnailUrl: undefined,
           formatType: item.isVideo ? 'video' : 'image',
           aspectRatio: batchAspectRatio,
           deviceFormat: isMobileBatch ? 'mobile' : 'desktop',
@@ -1526,42 +1539,68 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
           thumbnailDataUrl: item.thumbnailUrl,
         });
 
-        publishedWallpapers.push(res.wallpaper);
-        if (res.syncedToSupabase) cloudSyncedCount++;
-        if (res.error && !firstSyncWarning) firstSyncWarning = res.error;
+        if (res.syncedToSupabase && !res.error) {
+          publishedWallpapers.push(res.wallpaper);
+          succeededIds.add(item.id);
+        } else {
+          failedCount++;
+          if (!firstSyncError) {
+            firstSyncError = res.error || 'Supabase upload/insert failed.';
+          }
+        }
       }
 
-      onAddWallpapers(publishedWallpapers);
-      setQueuedFiles([]);
+      if (publishedWallpapers.length > 0) {
+        onAddWallpapers(publishedWallpapers);
+      }
 
-      const cloudNote = supabaseStatus.configured
-        ? ` (${cloudSyncedCount}/${publishedWallpapers.length} synced to Supabase${firstSyncWarning ? ` — ${firstSyncWarning}` : ''})`
-        : '';
-
-      setBulkNotice(
-        lang === 'ar'
-          ? `تم نشر ${publishedWallpapers.length} خلفيات بنجاح إلى قسم "${bulkOpt.labelAr}"${cloudNote}!`
-          : `Successfully published ${publishedWallpapers.length} wallpapers to "${bulkOpt.labelEn}"${cloudNote}!`
-      );
-
-      setTimeout(() => {
-        setBulkNotice(null);
-        setAdminTab('manage');
-      }, 2000);
+      if (failedCount > 0) {
+        setQueuedFiles((prev) => prev.filter((q) => !succeededIds.has(q.id)));
+        setBulkNoticeType('error');
+        setBulkNotice(
+          lang === 'ar'
+            ? `فشل رفع ${failedCount} ملفات إلى Supabase (${publishedWallpapers.length} نجحت). السبب: ${firstSyncError}`
+            : `${failedCount} file(s) failed to upload to Supabase (${publishedWallpapers.length} succeeded). Error: ${firstSyncError}`
+        );
+      } else {
+        setQueuedFiles([]);
+        setBulkNoticeType('success');
+        setBulkNotice(
+          lang === 'ar'
+            ? `تم رفع ونشر ${publishedWallpapers.length} خلفيات بنجاح في Supabase (${bulkOpt.labelAr})!`
+            : `Successfully uploaded and published ${publishedWallpapers.length} wallpapers to Supabase (${bulkOpt.labelEn})!`
+        );
+        setTimeout(() => {
+          setBulkNotice(null);
+          setAdminTab('manage');
+        }, 2000);
+      }
     } catch (err: any) {
       console.error('Bulk publish error:', err);
+      setBulkNoticeType('error');
       setBulkNotice(
         lang === 'ar'
-          ? `تعذر نشر الدفعة بالكامل: ${err?.message || 'خطأ غير متوقع'}`
-          : `Bulk publish failed: ${err?.message || 'Unexpected error'}`
+          ? `تعذر نشر الدفعة في Supabase: ${err?.message || 'خطأ غير متوقع'}`
+          : `Supabase batch upload failed: ${err?.message || 'Unexpected error'}`
       );
     } finally {
       setBulkPublishing(false);
     }
   };
 
-  // Inline placement and category re-assignment with real-time Supabase & IndexedDB update
+  // Inline placement and category re-assignment with real-time Supabase update
   const handleInlinePlacementChange = async (wp: Wallpaper, newPlacementKey: string) => {
+    if (!supabaseStatus.configured) {
+      setManageNoticeType('error');
+      setManageNotice(
+        supabaseStatus.error ||
+          (lang === 'ar'
+            ? 'تعذر التحديث: إعدادات Supabase غير متوفرة.'
+            : 'Update blocked: Supabase is not configured.')
+      );
+      return;
+    }
+
     const targetOpt = TARGET_PLACEMENT_OPTIONS.find((o) => o.key === newPlacementKey);
     if (!targetOpt) return;
 
@@ -1594,16 +1633,27 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
 
     try {
       const res = await updateWallpaperWithSync(updated);
+      if (!res.syncedToSupabase || res.error) {
+        setManageNoticeType('error');
+        setManageNotice(
+          res.error ||
+            (lang === 'ar' ? 'فشل تحديث التصنيف في Supabase.' : 'Failed to update placement in Supabase.')
+        );
+        return;
+      }
+
       onUpdateWallpaper(res.wallpaper);
-      setManageNoticeType(res.error ? 'info' : 'success');
+      setManageNoticeType('success');
       setManageNotice(
         lang === 'ar'
-          ? `تم تحديث التصنيف والوجهة إلى: "${targetOpt.labelAr}" وحفظها فوراً!`
-          : `Placement switched to: "${targetOpt.labelEn}"${res.syncedToSupabase ? ' and synced to Supabase!' : ' and saved locally!'}`
+          ? `تم تحديث التصنيف والوجهة إلى "${targetOpt.labelAr}" في Supabase!`
+          : `Placement updated to "${targetOpt.labelEn}" in Supabase!`
       );
       setTimeout(() => setManageNotice(null), 3000);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error updating wallpaper placement:', err);
+      setManageNoticeType('error');
+      setManageNotice(err?.message || 'Failed to update wallpaper placement in Supabase.');
     }
   };
 
@@ -1716,81 +1766,116 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
     setEditTags((Array.isArray(wp.tags) ? wp.tags : []).join(', '));
     setEditDescEn(typeof wp.description === 'string' ? wp.description : wp.description?.en || '');
     setEditDescAr(typeof wp.description === 'string' ? wp.description : wp.description?.ar || '');
+    setEditError(null);
   };
 
   const handleSaveWallpaperEdit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingWallpaper) return;
+    if (!editingWallpaper || isSavingEdit) return;
 
-    const parsedTags = editTags
-      .split(',')
-      .map((t) => t.trim())
-      .filter(Boolean);
+    if (!supabaseStatus.configured) {
+      setEditError(
+        supabaseStatus.error ||
+          (lang === 'ar'
+            ? 'تعذر الحفظ: متغيرات Supabase غير مضبوطة.'
+            : 'Update blocked: Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY.')
+      );
+      return;
+    }
 
-    const updated: Wallpaper = {
-      ...editingWallpaper,
-      title: {
-        en: editTitleEn.trim() || editingWallpaper.title?.en || 'Untitled 4K Wallpaper',
-        ar: editTitleAr.trim() || editingWallpaper.title?.ar || editTitleEn.trim() || 'خلفية 4K',
-      },
-      description: {
-        en: editDescEn.trim() || (typeof editingWallpaper.description === 'string' ? editingWallpaper.description : editingWallpaper.description?.en || ''),
-        ar: editDescAr.trim() || (typeof editingWallpaper.description === 'string' ? editingWallpaper.description : editingWallpaper.description?.ar || ''),
-      },
-      category: editCategory,
-      resolution: editResolution,
-      tags: parsedTags.length > 0 ? parsedTags : (Array.isArray(editingWallpaper.tags) ? editingWallpaper.tags : []),
-    };
+    setIsSavingEdit(true);
+    setEditError(null);
 
-    const res = await updateWallpaperWithSync(updated);
-    onUpdateWallpaper(res.wallpaper);
-    setEditingWallpaper(null);
-    setManageNoticeType(res.error ? 'info' : 'success');
-    setManageNotice(
-      res.error
-        ? (lang === 'ar'
-            ? `تم التحديث محلياً (تنبيه السحابة: ${res.error})`
-            : `Updated locally (cloud notice: ${res.error})`)
-        : (lang === 'ar'
-            ? 'تم تحديث بيانات الخلفية ومزامنتها بنجاح!'
-            : `Wallpaper details updated${res.syncedToSupabase ? ' & synced to Supabase!' : ' successfully!'}`)
-    );
-    setTimeout(() => setManageNotice(null), 3500);
+    try {
+      const parsedTags = editTags
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean);
+
+      const updated: Wallpaper = {
+        ...editingWallpaper,
+        title: {
+          en: editTitleEn.trim() || editingWallpaper.title?.en || 'Untitled 4K Wallpaper',
+          ar: editTitleAr.trim() || editingWallpaper.title?.ar || editTitleEn.trim() || 'خلفية 4K',
+        },
+        description: {
+          en: editDescEn.trim() || (typeof editingWallpaper.description === 'string' ? editingWallpaper.description : editingWallpaper.description?.en || ''),
+          ar: editDescAr.trim() || (typeof editingWallpaper.description === 'string' ? editingWallpaper.description : editingWallpaper.description?.ar || ''),
+        },
+        category: editCategory,
+        resolution: editResolution,
+        tags: parsedTags.length > 0 ? parsedTags : (Array.isArray(editingWallpaper.tags) ? editingWallpaper.tags : []),
+      };
+
+      const res = await updateWallpaperWithSync(updated);
+      if (!res.syncedToSupabase || res.error) {
+        setEditError(
+          res.error ||
+            (lang === 'ar'
+              ? 'فشل حفظ التعديلات في قاعدة بيانات Supabase.'
+              : 'Failed to update wallpaper in Supabase.')
+        );
+        return;
+      }
+
+      onUpdateWallpaper(res.wallpaper);
+      setEditingWallpaper(null);
+      setManageNoticeType('success');
+      setManageNotice(
+        lang === 'ar'
+          ? 'تم تحديث بيانات الخلفية ومزامنتها في Supabase بنجاح!'
+          : 'Wallpaper details updated and synced to Supabase!'
+      );
+      setTimeout(() => setManageNotice(null), 3500);
+    } catch (err: any) {
+      setEditError(err?.message || 'Unexpected error updating wallpaper in Supabase.');
+    } finally {
+      setIsSavingEdit(false);
+    }
   };
 
   const handleDeleteWallpaperConfirm = async (id: string) => {
     if (!id) return;
+    if (!supabaseStatus.configured) {
+      setWallpaperToDeleteId(null);
+      setManageNoticeType('error');
+      setManageNotice(
+        supabaseStatus.error ||
+          (lang === 'ar'
+            ? 'تعذر الحذف: متغيرات Supabase غير مضبوطة.'
+            : 'Delete blocked: Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY.')
+      );
+      return;
+    }
+
     setIsDeletingWallpaper(true);
     try {
       const targetWp = wallpapers.find((w) => w.id === id);
 
-      // 1. Delete from Supabase Storage bucket + public.wallpapers + IndexedDB
+      // Strictly delete from Supabase Storage bucket "wallpapers" + public.wallpapers
       const result = await deleteWallpaperWithSync(targetWp || id);
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to delete wallpaper record');
+      if (!result.success || !result.syncedToSupabase) {
+        throw new Error(result.error || 'Failed to delete wallpaper from Supabase');
       }
 
-      // Also clean up any lingering media blobs by ID
-      await deleteMediaFromIndexedDB(id).catch(() => {});
-
-      // 2. Synchronize parent React state immediately
+      // Synchronize parent React state after Supabase confirms
       await onDeleteWallpaper(id);
 
-      // 3. Close confirmation modal & trigger success notification
       setWallpaperToDeleteId(null);
       setManageNoticeType('success');
       setManageNotice(
         lang === 'ar'
-          ? 'تم حذف الخلفية وملفاتها نهائياً من السحابة وقاعدة البيانات المحلية!'
-          : `Wallpaper and media purged${result.syncedToSupabase ? ' from Supabase Storage/DB & IndexedDB!' : ' from IndexedDB!'}`
+          ? 'تم حذف الخلفية وملفاتها نهائياً من Supabase Storage و public.wallpapers!'
+          : 'Wallpaper and storage files permanently deleted from Supabase!'
       );
     } catch (err: any) {
-      console.error('Failed to permanently delete wallpaper:', err);
+      console.error('Failed to permanently delete wallpaper from Supabase:', err);
+      setWallpaperToDeleteId(null);
       setManageNoticeType('error');
       setManageNotice(
         lang === 'ar'
-          ? `فشل في حذف الخلفية من قاعدة البيانات: ${err?.message || 'خطأ غير متوقع'}`
-          : `Failed to delete wallpaper: ${err?.message || 'Unexpected database error'}`
+          ? `فشل حذف الخلفية من Supabase: ${err?.message || 'خطأ غير متوقع'}`
+          : `Failed to delete wallpaper from Supabase: ${err?.message || 'Unexpected error'}`
       );
     } finally {
       setIsDeletingWallpaper(false);
@@ -2010,18 +2095,18 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                     className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${
                       supabaseStatus.configured
                         ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                        : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                        : 'bg-rose-500/15 text-rose-300 border-rose-500/30'
                     }`}
                   >
-                    {supabaseStatus.configured ? 'SUPABASE + IDB' : 'LOCAL IDB MODE'}
+                    {supabaseStatus.configured ? 'SUPABASE CLOUD' : 'SUPABASE NOT CONFIGURED'}
                   </span>
                 )}
               </div>
               {isAuthenticated && (
                 <p className="text-xs text-neutral-400">
                   {lang === 'ar'
-                    ? 'لوحة الإدارة والتحكم في رفع الخلفيات بدقة 4K ومزامنتها مع Supabase و IndexedDB'
-                    : '4K Wallpaper Upload & Cloud/IndexedDB Sync Management System'}
+                    ? 'لوحة الإدارة والتحكم في رفع الخلفيات بدقة 4K ومزامنتها مباشرة مع Supabase'
+                    : '4K Wallpaper Upload & Supabase Cloud Storage / Database Management'}
                 </p>
               )}
             </div>
@@ -2030,7 +2115,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
           <div className="flex items-center gap-2">
             {isAuthenticated && (
               <>
-                {supabaseStatus.configured && onRefreshFromCloud && (
+                {onRefreshFromCloud && (
                   <button
                     type="button"
                     onClick={handleSyncCloudNow}
@@ -2039,19 +2124,9 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                     title="Sync Wallpapers from Supabase"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${isCloudSyncing ? 'animate-spin' : ''}`} />
-                    <span>{lang === 'ar' ? 'مزامنة السحابة' : 'Sync Cloud'}</span>
+                    <span>{lang === 'ar' ? 'مزامنة Supabase' : 'Sync Supabase'}</span>
                   </button>
                 )}
-
-                <button
-                  type="button"
-                  onClick={handleMasterSaveChanges}
-                  className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/30 text-cyan-300 text-xs font-bold transition-all cursor-pointer"
-                  title="Force Persist All Changes to Storage"
-                >
-                  <Database className="w-3.5 h-3.5" />
-                  <span>{lang === 'ar' ? 'مزامنة وحفظ دائم' : 'Save to Storage'}</span>
-                </button>
 
                 <button
                   onClick={handleLogoutAdmin}
@@ -2071,6 +2146,19 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Supabase Configuration / Connection Error Banner */}
+        {isAuthenticated && (!supabaseStatus.configured || cloudSyncError) && (
+          <div className="bg-rose-950/90 border-b border-rose-500/40 px-6 py-2.5 text-xs text-rose-200 flex items-center gap-2.5">
+            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span className="font-medium">
+              {!supabaseStatus.configured
+                ? supabaseStatus.error ||
+                  'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to enable uploads, edits, and deletions.'
+                : `Supabase error: ${cloudSyncError}`}
+            </span>
+          </div>
+        )}
 
         {/* Master Save Toast */}
         {masterSaveToast && (
@@ -2266,28 +2354,59 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                   )}
 
                   <form onSubmit={handlePublishManualWallpaper} className="space-y-6">
-                    {/* Top Storage Guarantee Badge */}
-                    <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-2xl bg-[#151722] border border-[#272B3E]">
+                    {/* Top Supabase Cloud Storage Status Card */}
+                    <div
+                      className={`flex flex-wrap items-center justify-between gap-3 p-4 rounded-2xl border ${
+                        supabaseStatus.configured
+                          ? 'bg-[#151722] border-[#272B3E]'
+                          : 'bg-rose-950/20 border-rose-500/40'
+                      }`}
+                    >
                       <div className="flex items-center gap-2.5">
-                        <div className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
-                          <Database className="w-4 h-4" />
+                        <div
+                          className={`p-2 rounded-xl border ${
+                            supabaseStatus.configured
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                              : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                          }`}
+                        >
+                          <Cloud className="w-4 h-4" />
                         </div>
                         <div>
                           <div className="text-xs font-black text-white">
-                            {lang === 'ar' ? 'التخزين الدائم التلقائي (IndexedDB)' : 'IndexedDB Zero-Decay Storage Engine'}
+                            {supabaseStatus.configured
+                              ? lang === 'ar'
+                                ? 'محرك التخزين السحابي Supabase (Storage & PostgreSQL)'
+                                : 'Supabase Cloud Storage & PostgreSQL Database'
+                              : lang === 'ar'
+                              ? 'يلزم تهيئة اتصال Supabase للنشر'
+                              : 'Supabase Configuration Required'}
                           </div>
                           <div className="text-[11px] text-neutral-400">
-                            {lang === 'ar'
-                              ? 'يتم تحويل الملفات وحفظها كـ Blobs حقيقية مع توليد مصغرات خفيفة 640px أوتوماتيكياً.'
-                              : 'Files are stored as raw Blobs in IndexedDB with automated lightweight grid thumbnail generation.'}
+                            {supabaseStatus.configured
+                              ? lang === 'ar'
+                                ? 'يتم رفع الملفات مباشرة إلى حاوية wallpapers وحفظ البيانات في جدول public.wallpapers.'
+                                : 'Files upload directly to the public "wallpapers" storage bucket and save to public.wallpapers.'
+                              : supabaseStatus.error ||
+                                'Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY environment variables.'}
                           </div>
                         </div>
                       </div>
 
                       <div className="flex items-center gap-2 font-mono text-[10px]">
-                        <span className="px-2.5 py-1 rounded-lg bg-green-500/10 border border-green-500/30 text-green-300 font-bold flex items-center gap-1.5">
-                          <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-                          <span>IndexedDB v3 Online</span>
+                        <span
+                          className={`px-2.5 py-1 rounded-lg border font-bold flex items-center gap-1.5 ${
+                            supabaseStatus.configured
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                              : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                          }`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              supabaseStatus.configured ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'
+                            }`}
+                          />
+                          <span>{supabaseStatus.configured ? 'Supabase Online' : 'Not Configured'}</span>
                         </span>
                       </div>
                     </div>
@@ -3139,15 +3258,15 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                       {manualPublishing ? (
                         <>
                           <span className="w-5 h-5 border-2 border-black/30 border-t-black rounded-full animate-spin" />
-                          <span>{lang === 'ar' ? 'جاري الحفظ في IndexedDB...' : 'Persisting 4K Blobs to IndexedDB...'}</span>
+                          <span>{lang === 'ar' ? 'جاري الرفع والحفظ في Supabase...' : 'Uploading to Supabase Storage & DB...'}</span>
                         </>
                       ) : (
                         <>
                           <UploadCloud className="w-5 h-5 stroke-[2.5]" />
                           <span>
                             {lang === 'ar'
-                              ? 'حفظ ونشر الخلفية إلى مستودع DeskSpace4K'
-                              : 'Publish 4K Wallpaper to Repository'}
+                              ? 'رفع ونشر الخلفية إلى Supabase'
+                              : 'Publish 4K Wallpaper to Supabase'}
                           </span>
                         </>
                       )}
@@ -3393,6 +3512,13 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                         </div>
 
                         <form onSubmit={handleSaveWallpaperEdit} className="space-y-3.5">
+                          {editError && (
+                            <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex items-center gap-2">
+                              <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                              <span>{editError}</span>
+                            </div>
+                          )}
+
                           <div>
                             <label className="block text-[11px] font-bold text-neutral-400 mb-1">
                               Title (English)
@@ -3463,16 +3589,22 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                           <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#242738]">
                             <button
                               type="button"
-                              onClick={() => setEditingWallpaper(null)}
-                              className="px-4 py-2 rounded-xl bg-[#1C1E2B] text-neutral-300 text-xs font-bold hover:bg-[#25283A]"
+                              disabled={isSavingEdit}
+                              onClick={() => {
+                                setEditingWallpaper(null);
+                                setEditError(null);
+                              }}
+                              className="px-4 py-2 rounded-xl bg-[#1C1E2B] text-neutral-300 text-xs font-bold hover:bg-[#25283A] disabled:opacity-50"
                             >
                               {lang === 'ar' ? 'إلغاء' : 'Cancel'}
                             </button>
                             <button
                               type="submit"
-                              className="px-5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black text-xs font-black shadow-lg shadow-cyan-500/20"
+                              disabled={isSavingEdit}
+                              className="px-5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 text-black text-xs font-black shadow-lg shadow-cyan-500/20 flex items-center gap-1.5"
                             >
-                              {lang === 'ar' ? 'حفظ التغييرات' : 'Save Changes'}
+                              {isSavingEdit && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                              <span>{lang === 'ar' ? 'حفظ التغييرات' : 'Save to Supabase'}</span>
                             </button>
                           </div>
                         </form>
@@ -3493,8 +3625,8 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                           </h4>
                           <p className="text-xs text-neutral-400 mt-1">
                             {lang === 'ar'
-                              ? 'سيتم حذف ملفات الوسائط والصور والمصغرات نهائياً من IndexedDB، ولن تعود أبداً حتى بعد إعادة تحميل الصفحة.'
-                              : 'All media files, blobs, and thumbnails will be purged from IndexedDB and will never reappear after reload.'}
+                              ? 'سيتم حذف السجل من جدول public.wallpapers وحذف ملفات الوسائط نهائياً من حاوية wallpapers في Supabase Storage.'
+                              : 'This record will be deleted from public.wallpapers and its media files will be removed from the Supabase Storage "wallpapers" bucket.'}
                           </p>
                         </div>
                         <div className="flex items-center justify-center gap-2 pt-2">
@@ -3515,7 +3647,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                             {isDeletingWallpaper ? (
                               <>
                                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                <span>{lang === 'ar' ? 'جاري الحذف من IndexedDB...' : 'Purging IndexedDB...'}</span>
+                                <span>{lang === 'ar' ? 'جاري الحذف من Supabase...' : 'Deleting from Supabase...'}</span>
                               </>
                             ) : (
                               <>
@@ -3537,9 +3669,28 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
               {adminTab === 'bulk' && (
                 <div className="max-w-4xl mx-auto space-y-6">
                   {bulkNotice && (
-                    <div className="p-3.5 rounded-xl bg-green-500/10 border border-green-500/30 text-green-300 text-xs flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-green-400" />
-                      <span>{bulkNotice}</span>
+                    <div
+                      className={`p-3.5 rounded-xl border text-xs flex items-center justify-between gap-2 ${
+                        bulkNoticeType === 'error'
+                          ? 'bg-red-500/10 border-red-500/30 text-red-300'
+                          : 'bg-green-500/10 border-green-500/30 text-green-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        {bulkNoticeType === 'error' ? (
+                          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                        ) : (
+                          <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />
+                        )}
+                        <span>{bulkNotice}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setBulkNotice(null)}
+                        className="opacity-70 hover:opacity-100 shrink-0"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
                     </div>
                   )}
 
@@ -4566,7 +4717,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                           <Database className="w-5 h-5" />
                         </div>
                         <div>
-                          <div className="text-xs font-black text-white">IndexedDB Storage & Backup Management</div>
+                          <div className="text-xs font-black text-white">Supabase Cloud Storage & Backup Management</div>
                           <div className="text-[11px] text-neutral-400">
                             Export a standalone JSON backup of all wallpaper metadata, tags, and articles.
                           </div>
@@ -4584,24 +4735,43 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                     </div>
 
                     <div className="p-4 rounded-xl bg-[#0B0C10] border border-[#1E202B] text-xs font-mono text-neutral-400 space-y-1">
-                      <div>Database: DeskSpace4K_IndexedDB_v3</div>
-                      <div>ObjectStores: [media_blobs, custom_wallpapers, custom_blog_posts]</div>
-                      <div>Persistence Status: Permanent Local IndexedDB (Zero Volatile URL Decay)</div>
+                      <div>PostgreSQL Table: public.wallpapers</div>
+                      <div>Storage Bucket: wallpapers (Public)</div>
+                      <div>
+                        Sync Mode:{' '}
+                        {supabaseStatus.configured
+                          ? 'Direct Supabase Cloud Storage & Database'
+                          : 'Disconnected (Missing VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)'}
+                      </div>
                     </div>
 
-                    <div className="p-4 rounded-xl bg-[#0B0C10] border border-[#1E202B] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div
+                      className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                        supabaseStatus.configured && !cloudSyncError
+                          ? 'bg-[#0B0C10] border-[#1E202B]'
+                          : 'bg-rose-950/20 border-rose-500/30'
+                      }`}
+                    >
                       <div className="flex items-start gap-2.5 text-xs">
-                        <Cloud className={`w-4 h-4 shrink-0 mt-0.5 ${supabaseStatus.configured ? 'text-emerald-400' : 'text-amber-400'}`} />
+                        <Cloud
+                          className={`w-4 h-4 shrink-0 mt-0.5 ${
+                            supabaseStatus.configured && !cloudSyncError ? 'text-emerald-400' : 'text-rose-400'
+                          }`}
+                        />
                         <div className="space-y-0.5">
                           <div className="font-bold text-white">
-                            {supabaseStatus.configured ? 'Supabase Storage & Database Connected' : 'Supabase Running in Safe Local Fallback'}
+                            {supabaseStatus.configured
+                              ? cloudSyncError
+                                ? 'Supabase Connection Error'
+                                : 'Supabase Storage & Database Connected'
+                              : 'Supabase Not Configured'}
                           </div>
                           <div className="text-[11px] text-neutral-400">
                             {cloudSyncError || supabaseStatus.error || 'Table: public.wallpapers · Bucket: wallpapers'}
                           </div>
                         </div>
                       </div>
-                      {supabaseStatus.configured && onRefreshFromCloud && (
+                      {onRefreshFromCloud && (
                         <button
                           type="button"
                           onClick={handleSyncCloudNow}
@@ -4648,7 +4818,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                     </div>
                   )}
 
-                  {/* 1. Strict Data-Safety & Local Storage Integrity Guarantee Card */}
+                  {/* 1. Strict Data-Safety & Cloud Sync Guarantee Card */}
                   <div className="p-5 rounded-2xl bg-gradient-to-br from-[#0B1516] via-[#0E1726] to-[#12121E] border border-emerald-500/30 shadow-xl space-y-3">
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex items-center gap-3">
@@ -4659,8 +4829,8 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                           <div className="flex items-center gap-2">
                             <h3 className="text-sm font-black text-white">
                               {lang === 'ar'
-                                ? 'ضمان أمان البيانات الصارم وسلامة IndexedDB'
-                                : 'Strict Data-Safety & Local Storage Integrity Guarantee'}
+                                ? 'ضمان أمان البيانات وسلامة قاعدة بيانات Supabase'
+                                : 'Strict Data-Safety & Supabase Integrity Guarantee'}
                             </h3>
                             <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 font-mono text-[9px] font-bold border border-emerald-500/30">
                               ATOMIC ONLY
@@ -4668,8 +4838,8 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                           </div>
                           <p className="text-xs text-neutral-300 mt-1 leading-relaxed">
                             {lang === 'ar'
-                              ? 'جميع الإجراءات المؤتمتة المنفذة عبر المساعد الذكي تقوم بإنشاء أو تحديث السجلات المحددة فقط بشكل ذري. قاعدة بيانات IndexedDB ومستودعاتها (custom_wallpapers و media_blobs) لا يتم مسحها أو إعادة تعيينها إطلاقاً، وجميع الـ 150+ وسائط مخزنة محمية بنسبة 100%.'
-                              : 'All automated actions performed by the AI Copilot ONLY create or update specified records atomically. The underlying IndexedDB database is never reset or dropped, and all 150+ existing user wallpapers, 4K media blobs, and custom assets remain strictly preserved and untouched.'}
+                              ? 'جميع الإجراءات المؤتمتة المنفذة عبر المساعد الذكي تقوم بإنشاء أو تحديث السجلات المحددة فقط في Supabase دون مسح أو حذف أي خلفيات أو ملفات مخزنة.'
+                              : 'All automated actions performed by the AI Copilot ONLY create or update specified records atomically in Supabase without resetting or deleting existing wallpapers or storage assets.'}
                           </p>
                         </div>
                       </div>
@@ -4679,15 +4849,11 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                     <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-emerald-500/15 text-[10px] font-mono">
                       <span className="px-2.5 py-1 rounded-lg bg-emerald-950/40 border border-emerald-500/30 text-emerald-300 flex items-center gap-1.5 font-bold">
                         <Check className="w-3 h-3 text-emerald-400" />
-                        <span>IndexedDB Stores: LOCKED & PRESERVED</span>
+                        <span>Supabase Table: public.wallpapers</span>
                       </span>
                       <span className="px-2.5 py-1 rounded-lg bg-emerald-950/40 border border-emerald-500/30 text-emerald-300 flex items-center gap-1.5 font-bold">
                         <Check className="w-3 h-3 text-emerald-400" />
-                        <span>150+ User Assets: 100% SAFE</span>
-                      </span>
-                      <span className="px-2.5 py-1 rounded-lg bg-emerald-950/40 border border-emerald-500/30 text-emerald-300 flex items-center gap-1.5 font-bold">
-                        <Check className="w-3 h-3 text-emerald-400" />
-                        <span>Targeted Record Updates: store.put() Only</span>
+                        <span>Targeted Upserts Only</span>
                       </span>
                     </div>
                   </div>
@@ -4710,8 +4876,8 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                           </div>
                           <p className="text-xs text-neutral-400 mt-0.5">
                             {lang === 'ar'
-                              ? 'اكتب تعليمات مباشرة لتوليد مقالات SEO، أو تحديث الوسوم جماعياً، أو تحسين البيانات الوصفية مباشرة في الذاكرة و IndexedDB.'
-                              : 'Type natural language commands to generate SEO articles, batch update tags, or refine metadata directly into local state and IndexedDB.'}
+                              ? 'اكتب تعليمات مباشرة لتوليد مقالات SEO، أو تحديث الوسوم جماعياً، أو تحسين البيانات الوصفية مباشرة في Supabase.'
+                              : 'Type natural language commands to generate SEO articles, batch update tags, or refine wallpaper metadata in Supabase.'}
                           </p>
                         </div>
                       </div>
@@ -4955,8 +5121,8 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                           <Shield className="w-4 h-4 text-emerald-400 shrink-0" />
                           <span>
                             {lang === 'ar'
-                              ? 'سيتم الحفظ ذرياً في IndexedDB دون مساس بأي من الـ 150+ وسائط مخزنة.'
-                              : 'Executes atomic IndexedDB update. All 150+ user media assets remain preserved.'}
+                              ? 'يتم تنفيذ التحديثات المستهدفة ومزامنتها مع Supabase بأمان.'
+                              : 'Executes targeted atomic updates and syncs directly with Supabase.'}
                           </span>
                         </div>
 
@@ -4978,12 +5144,12 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                             {copilotExecuting ? (
                               <>
                                 <Loader2 className="w-4 h-4 animate-spin" />
-                                <span>{lang === 'ar' ? 'جاري الحفظ الذري في IndexedDB...' : 'Persisting to IndexedDB...'}</span>
+                                <span>{lang === 'ar' ? 'جاري المزامنة مع Supabase...' : 'Syncing Changes...'}</span>
                               </>
                             ) : (
                               <>
                                 <Zap className="w-4 h-4" />
-                                <span>{lang === 'ar' ? '⚡ تنفيذ وحفظ في IndexedDB' : '⚡ Execute & Save to IndexedDB'}</span>
+                                <span>{lang === 'ar' ? '⚡ تنفيذ ومزامنة التعديلات' : '⚡ Execute & Sync Changes'}</span>
                               </>
                             )}
                           </button>
