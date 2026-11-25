@@ -172,14 +172,14 @@ const baseTranslations = {
     downloadedOn: 'Downloaded on',
 
     // Admin Panel (Secret)
-    adminTitle: 'DeskSpace4K Control Center',
-    adminSubtitle: 'Secret Administration Dashboard & Bulk Content Manager',
-    adminLoginPrompt: 'Restricted Access: Enter the administrator credentials.',
-    adminPasswordPlaceholder: 'Admin Master Password',
-    adminLoginBtn: 'Authenticate Session',
-    adminLogout: 'Exit Admin Panel',
-    adminWrongPassword: 'Invalid administration password. Access denied.',
-    adminHint: 'Default Master Key: DeskAdmin4K!2026',
+    adminTitle: 'Admin',
+    adminSubtitle: 'Administration Dashboard & Content Manager',
+    adminLoginPrompt: 'Enter password to continue.',
+    adminPasswordPlaceholder: 'Enter password...',
+    adminLoginBtn: 'Sign In',
+    adminLogout: 'Exit Admin',
+    adminWrongPassword: 'Incorrect password. Access denied.',
+    adminHint: '',
     adminShortcutTip: 'Direct browser access: Type /secret-admin directly into your browser address bar',
 
     // Admin Stats
@@ -462,14 +462,14 @@ const baseTranslations = {
     downloadedOn: 'تم التحميل في',
 
     // Admin Panel (Secret)
-    adminTitle: 'مركز تحكم ديسك سبيس 4K',
-    adminSubtitle: 'لوحة الإدارة السرية ونظام الرفع الجماعي للمحتوى',
-    adminLoginPrompt: 'منطقة محظورة: يرجى إدخال كلمة مرور الإدارة المركزية.',
-    adminPasswordPlaceholder: 'كلمة مرور المشرف العام',
-    adminLoginBtn: 'التحقق والمصادقة',
+    adminTitle: 'Admin',
+    adminSubtitle: 'لوحة الإدارة ونظام إدارة المحتوى',
+    adminLoginPrompt: 'أدخل كلمة المرور للمتابعة.',
+    adminPasswordPlaceholder: 'أدخل كلمة المرور...',
+    adminLoginBtn: 'تسجيل الدخول',
     adminLogout: 'مغادرة لوحة التحكم',
     adminWrongPassword: 'كلمة المرور غير صحيحة. تم رفض الوصول.',
-    adminHint: 'المفتاح الافتراضي: DeskAdmin4K!2026',
+    adminHint: '',
     adminShortcutTip: 'مسار الوصول السري: اكتب /secret-admin مباشرة في شريط عنوان المتصفح',
 
     // Admin Stats

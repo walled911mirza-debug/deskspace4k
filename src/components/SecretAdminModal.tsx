@@ -17,7 +17,6 @@ import {
   Search,
   Layers,
   Sparkles,
-  HelpCircle,
   Link,
   Copy,
   Plus,
@@ -462,7 +461,6 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [passwordInput, setPasswordInput] = useState<string>('');
   const [authError, setAuthError] = useState<string | null>(null);
-  const [showHint, setShowHint] = useState<boolean>(false);
 
   // Active Admin Tabs: manual, bulk, manage, articles, stats, copilot
   const [adminTab, setAdminTab] = useState<'manual' | 'bulk' | 'manage' | 'articles' | 'stats' | 'copilot'>('manual');
@@ -740,17 +738,20 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
   // Auth handler
   const handleAuthSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (passwordInput === 'DeskAdmin4K!2026') {
+    const normalized = passwordInput.trim();
+    if (normalized === '911' || normalized === '123') {
       setIsAuthenticated(true);
       setAuthError(null);
+      setPasswordInput('');
     } else {
-      setAuthError(t.adminWrongPassword || 'Incorrect Master Key');
+      setAuthError(t.adminWrongPassword || 'Incorrect password. Access denied.');
     }
   };
 
   const handleLogoutAdmin = () => {
     setIsAuthenticated(false);
     setPasswordInput('');
+    setAuthError(null);
     onClose();
   };
 
@@ -2002,23 +2003,27 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-base sm:text-lg font-black text-white tracking-tight">
-                  DeskSpace4K Admin Center
+                  {!isAuthenticated ? 'Admin' : 'Admin Dashboard'}
                 </h2>
-                <span
-                  className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${
-                    supabaseStatus.configured
-                      ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                      : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
-                  }`}
-                >
-                  {supabaseStatus.configured ? 'SUPABASE + IDB' : 'LOCAL IDB MODE'}
-                </span>
+                {isAuthenticated && (
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${
+                      supabaseStatus.configured
+                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                        : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                    }`}
+                  >
+                    {supabaseStatus.configured ? 'SUPABASE + IDB' : 'LOCAL IDB MODE'}
+                  </span>
+                )}
               </div>
-              <p className="text-xs text-neutral-400">
-                {lang === 'ar'
-                  ? 'لوحة الإدارة والتحكم في رفع الخلفيات بدقة 4K ومزامنتها مع Supabase و IndexedDB'
-                  : '4K Wallpaper Upload & Cloud/IndexedDB Sync Management System'}
-              </p>
+              {isAuthenticated && (
+                <p className="text-xs text-neutral-400">
+                  {lang === 'ar'
+                    ? 'لوحة الإدارة والتحكم في رفع الخلفيات بدقة 4K ومزامنتها مع Supabase و IndexedDB'
+                    : '4K Wallpaper Upload & Cloud/IndexedDB Sync Management System'}
+                </p>
+              )}
             </div>
           </div>
 
@@ -2083,17 +2088,17 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
         {/* Body Content */}
         {!isAuthenticated ? (
           /* Password Authentication Gate */
-          <div className="flex-1 flex flex-col items-center justify-center p-8 sm:p-12 text-center max-w-md mx-auto">
+          <div className="flex-1 flex flex-col items-center justify-center p-8 sm:p-12 text-center max-w-md mx-auto w-full">
             <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mb-4 shadow-lg shadow-amber-500/10">
               <Key className="w-8 h-8" />
             </div>
             <h3 className="text-xl font-black text-white mb-1">
-              {lang === 'ar' ? 'تسجيل دخول المشرف' : 'Administrator Master Access'}
+              Admin
             </h3>
             <p className="text-xs text-neutral-400 mb-6 leading-relaxed">
               {lang === 'ar'
-                ? 'أدخل المفتاح الإداري السري للوصول إلى إدارة ورفع خلفيات الشاشة بدقة 4K والمقالات.'
-                : 'Enter the master security key to manage 4K wallpaper uploads, storage, and articles.'}
+                ? 'أدخل كلمة المرور للمتابعة.'
+                : 'Enter password to continue.'}
             </p>
 
             {authError && (
@@ -2104,12 +2109,20 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
             )}
 
             <form onSubmit={handleAuthSubmit} className="w-full space-y-3">
+              <label htmlFor="admin-password-input" className="sr-only">
+                Admin
+              </label>
               <input
+                id="admin-password-input"
                 type="password"
                 required
-                placeholder={lang === 'ar' ? 'أدخل المفتاح الإداري...' : 'Enter Master Security Key...'}
+                autoComplete="current-password"
+                placeholder={lang === 'ar' ? 'أدخل كلمة المرور...' : 'Enter password...'}
                 value={passwordInput}
-                onChange={(e) => setPasswordInput(e.target.value)}
+                onChange={(e) => {
+                  setPasswordInput(e.target.value);
+                  if (authError) setAuthError(null);
+                }}
                 className="w-full px-4 py-3.5 rounded-2xl bg-[#08090D] border border-[#272A3C] text-white text-xs placeholder:text-neutral-600 focus:outline-none focus:border-cyan-500 transition-colors"
               />
 
@@ -2117,26 +2130,9 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                 type="submit"
                 className="w-full py-3.5 px-4 rounded-2xl font-black text-xs bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black shadow-lg shadow-cyan-500/20 transition-all cursor-pointer"
               >
-                {lang === 'ar' ? 'فتح لوحة التحكم' : 'Unlock Admin Dashboard'}
+                {lang === 'ar' ? 'تسجيل الدخول' : 'Sign In'}
               </button>
             </form>
-
-            <div className="mt-6 flex flex-col items-center gap-2 text-xs">
-              <button
-                type="button"
-                onClick={() => setShowHint(!showHint)}
-                className="flex items-center gap-1.5 text-neutral-400 hover:text-cyan-400 transition-colors cursor-pointer"
-              >
-                <HelpCircle className="w-3.5 h-3.5" />
-                <span>{showHint ? 'Hide Master Key Hint' : 'Show Master Key Hint'}</span>
-              </button>
-
-              {showHint && (
-                <div className="p-3 rounded-xl bg-[#171822] border border-[#2B2E42] text-[11px] font-mono text-cyan-400">
-                  Master Key: <code className="text-white font-bold select-all">DeskAdmin4K!2026</code>
-                </div>
-              )}
-            </div>
           </div>
         ) : (
           /* Authenticated Dashboard */

@@ -1407,26 +1407,34 @@ export default function App() {
 
       {/* Protected Secret Admin Modal with Desktop Password verification (Code-Split for 0% Visitor Bundle Overhead) */}
       {isAdminModalOpen && (
-        <React.Suspense fallback={null}>
-          <SecretAdminModal
-            isOpen={isAdminModalOpen}
-            onClose={handleCloseAdmin}
-            lang={lang}
-            wallpapers={wallpapers}
-            onAddWallpapers={handleAddWallpapers}
-            onUpdateWallpaper={handleUpdateWallpaper}
-            onDeleteWallpaper={handleDeleteWallpaper}
-            onResetDefaults={handleResetDefaults}
-            totalDownloads={wallpapers.reduce((sum, w) => sum + (Number(w.downloads) || 0), 0)}
-            totalUsers={currentUser ? 1 : 0}
-            blogPosts={blogPosts}
-            onAddBlogPost={handleAddBlogPost}
-            onUpdateBlogPost={handleUpdateBlogPost}
-            onDeleteBlogPost={handleDeleteBlogPost}
-            onRefreshFromCloud={loadWallpapersFromCloud}
-            cloudSyncError={wallpapersError}
-          />
-        </React.Suspense>
+        <ErrorBoundary isSection fallbackTitle="Admin Safety Mode">
+          <React.Suspense
+            fallback={
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-xl text-neutral-300 text-xs font-bold">
+                Loading Admin...
+              </div>
+            }
+          >
+            <SecretAdminModal
+              isOpen={isAdminModalOpen}
+              onClose={handleCloseAdmin}
+              lang={lang}
+              wallpapers={wallpapers}
+              onAddWallpapers={handleAddWallpapers}
+              onUpdateWallpaper={handleUpdateWallpaper}
+              onDeleteWallpaper={handleDeleteWallpaper}
+              onResetDefaults={handleResetDefaults}
+              totalDownloads={wallpapers.reduce((sum, w) => sum + (Number(w.downloads) || 0), 0)}
+              totalUsers={currentUser ? 1 : 0}
+              blogPosts={blogPosts}
+              onAddBlogPost={handleAddBlogPost}
+              onUpdateBlogPost={handleUpdateBlogPost}
+              onDeleteBlogPost={handleDeleteBlogPost}
+              onRefreshFromCloud={loadWallpapersFromCloud}
+              cloudSyncError={wallpapersError}
+            />
+          </React.Suspense>
+        </ErrorBoundary>
       )}
 
       <LegalModals
