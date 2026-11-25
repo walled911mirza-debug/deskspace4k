@@ -1,8 +1,11 @@
 import { Wallpaper } from '../types';
+import { WALLPAPERS_DATA } from './wallpapersData';
 
 /**
- * Initial Wallpapers Seeding Data
- * Clean starting slate: Repository initializes completely empty ([]) with zero dummy or sample data.
- * All wallpapers are populated exclusively through the Admin Center (/secret-admin).
+ * Static Wallpapers Repository Data
+ * Embedded static typed array of 4K & Mobile wallpapers served directly from /public/wallpapers/
+ * and compatible with Cloudflare Pages global static CDN delivery.
  */
-export const INITIAL_WALLPAPERS: Wallpaper[] = [];
+export const INITIAL_WALLPAPERS: Wallpaper[] = Array.isArray(WALLPAPERS_DATA) ? WALLPAPERS_DATA : [];
+
+

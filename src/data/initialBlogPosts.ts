@@ -61,7 +61,7 @@ High-contrast, noisy wallpapers with sharp white geometric lines can cause color
 - وفّر إضاءة محيطية خافتة وغير مباشرة خلف الشاشة بنسبة تقارب 10% من إضاءة الشاشة.
 - عاير منحنى الغاما عند 2.2 / sRGB لضمان عدم طمس التفاصيل الداكنة التي قد تضطرك للتحديق المتعب.`,
     },
-    coverImage: '/src/assets/images/wallpaper_space_nebula_1792241809155.jpg',
+    coverImage: '/wallpapers/wallpaper_space_nebula_1792241809155.jpg',
     category: 'Tech',
     author: {
       name: 'DeskSpace Editorial Team',
@@ -147,7 +147,7 @@ Color psychology research confirms that biophilic tones—organic forest greens,
 2. اضبط ارتفاع حافة الشاشة العلوية بمحاذاة مستوى عينيك لمنع إجهاد الرقبة.
 3. اختر خلفية حية بدقة 4K ذات حركة انسيابية ناعمة بدون صوت لتمنحك الإلهام والهدوء.`,
     },
-    coverImage: '/src/assets/images/wallpaper_nature_mountains_1792241809437.jpg',
+    coverImage: '/wallpapers/wallpaper_nature_mountains_1792241809437.jpg',
     category: 'Guides',
     author: {
       name: 'DeskSpace Editorial Team',
@@ -241,7 +241,7 @@ If you are plugged into wall power on a modern desktop rig, a hardware-accelerat
 
 **الخلاصة**: إذا كان جهازك المكتبي متصلاً بالكهرباء أو يمتلك بطاقة شاشة حديثة، فإن الخلفيات المتحركة المنسقة تمنحك فخامة وسحراً لا مثيل لهما دون أي مساومة على سرعة واستجابة جهازك. أما إذا كنت تتنقل بحاسوب محمول يعتمد كلياً على البطارية، فإن اختيار خلفية ثابتة نقية بدقة 4K هو الخيار الأمثل للحفاظ على أطول عمر تشغيلي ممكن.`,
     },
-    coverImage: '/src/assets/images/wallpaper_gaming_cyberpunk_1792241811144.jpg',
+    coverImage: '/wallpapers/wallpaper_gaming_cyberpunk_1792241811144.jpg',
     category: 'Tech',
     author: {
       name: 'DeskSpace Editorial Team',

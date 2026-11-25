@@ -11,20 +11,23 @@ interface Props {
 interface State {
   hasError: boolean;
   error: Error | null;
+  errorInfo: ErrorInfo | null;
 }
 
 export class ErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
+    errorInfo: null,
   };
 
-  public static getDerivedStateFromError(error: Error): State {
+  public static getDerivedStateFromError(error: Error): Partial<State> {
     return { hasError: true, error };
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('DeskSpace4K ErrorBoundary caught an unhandled error:', error, errorInfo);
+    this.setState({ errorInfo });
   }
 
   private handleReload = () => {
@@ -40,11 +43,14 @@ export class ErrorBoundary extends Component<Props, State> {
   };
 
   private handleRetrySection = () => {
-    this.setState({ hasError: false, error: null });
+    this.setState({ hasError: false, error: null, errorInfo: null });
   };
 
   public render() {
     if (this.state.hasError) {
+      const errorMessage = this.state.error?.message || 'Unknown runtime error';
+      const componentStack = this.state.errorInfo?.componentStack?.trim();
+
       if (this.props.isSection) {
         return (
           <div className="w-full my-8 p-6 rounded-3xl bg-[#14151E] border border-rose-500/30 text-center max-w-lg mx-auto space-y-4 shadow-xl">
@@ -59,13 +65,28 @@ export class ErrorBoundary extends Component<Props, State> {
                 An isolated issue occurred in this section. The rest of the application is operating smoothly.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={this.handleRetrySection}
-              className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-black text-xs cursor-pointer shadow-lg shadow-cyan-500/20 transition-all"
-            >
-              Retry Section
-            </button>
+            {errorMessage && (
+              <div className="p-2.5 rounded-xl bg-[#0D0E14] border border-[#262A3C] text-[11px] font-mono text-rose-300 text-left overflow-x-auto max-h-24 break-words">
+                {errorMessage}
+              </div>
+            )}
+            <div className="flex items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={this.handleRetrySection}
+                className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-black text-xs cursor-pointer shadow-lg shadow-cyan-500/20 transition-all"
+              >
+                Retry Section
+              </button>
+              <button
+                type="button"
+                onClick={this.handleReload}
+                className="px-4 py-2 rounded-xl bg-[#202436] hover:bg-[#2A3047] text-neutral-200 font-bold text-xs cursor-pointer border border-[#303750] transition-all flex items-center gap-1.5"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Reload</span>
+              </button>
+            </div>
           </div>
         );
       }
@@ -89,11 +110,14 @@ export class ErrorBoundary extends Component<Props, State> {
               </p>
             </div>
 
-            {this.state.error?.message && (
-              <div className="p-3 rounded-xl bg-[#0F1016] border border-[#262A3C] text-[11px] font-mono text-rose-300 text-left overflow-x-auto max-h-24">
-                {this.state.error.message}
-              </div>
-            )}
+            <div className="p-3 rounded-xl bg-[#0F1016] border border-[#262A3C] text-[11px] font-mono text-rose-300 text-left overflow-auto max-h-36 space-y-1.5 break-words">
+              <div className="font-bold text-rose-400">{errorMessage}</div>
+              {componentStack && (
+                <pre className="text-[10px] text-neutral-500 whitespace-pre-wrap leading-tight">
+                  {componentStack.split('\n').slice(0, 5).join('\n')}
+                </pre>
+              )}
+            </div>
 
             <div className="space-y-2 pt-2">
               <button

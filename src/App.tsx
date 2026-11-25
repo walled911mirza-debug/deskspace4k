@@ -15,6 +15,8 @@ import {
   Smartphone,
   ChevronDown,
   Film,
+  AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
 import { Header } from './components/Header';
 import { HeroSection } from './components/HeroSection';
@@ -32,6 +34,7 @@ const SecretAdminModal = React.lazy(() =>
 import { Footer } from './components/Footer';
 import { BlogSection } from './components/BlogSection';
 import { MobileLiveSection } from './components/MobileLiveSection';
+import { EmptyState } from './components/EmptyState';
 import { Wallpaper, Category, Language, User, BlogPost, LegalModalType } from './types';
 import { translations } from './translations';
 import { INITIAL_WALLPAPERS } from './data/initialWallpapers';
@@ -45,7 +48,6 @@ import {
   safeSaveBlogPosts,
   loadCustomWallpapersFromIndexedDB,
   loadCustomBlogPostsFromIndexedDB,
-  deleteCustomWallpaperFromIndexedDB,
   clearAllCustomWallpapersInIndexedDB,
   permanentlyDeleteWallpaperFromIndexedDB,
   clearAllDeletedWallpaperIds,
@@ -60,6 +62,11 @@ import {
   restoreGalleryScroll,
 } from './utils/navigationState';
 import { DEFAULT_FALLBACK_IMAGE } from './utils/mediaUtils';
+import {
+  fetchWallpapersFromSupabase,
+  deleteWallpaperWithSync,
+  syncWallpaperStats,
+} from './lib/wallpapersService';
 
 export default function App() {
   const location = useLocation();
@@ -100,107 +107,168 @@ export default function App() {
     }
   });
 
-  // 2. Hydrate custom wallpapers and blog posts from IndexedDB (Data Safety Protocol)
+  // 2. Hydrate custom wallpapers & blog posts from IndexedDB + Supabase Cloud
   const isWallpapersHydratedRef = React.useRef(false);
   const isBlogHydratedRef = React.useRef(false);
+  const wallpapersRef = React.useRef<Wallpaper[]>(wallpapers);
+  wallpapersRef.current = wallpapers;
+
+  const [wallpapersLoading, setWallpapersLoading] = useState<boolean>(false);
+  const [wallpapersError, setWallpapersError] = useState<string | null>(null);
+
+  const loadWallpapersFromCloud = useCallback(async () => {
+    setWallpapersLoading(true);
+    setWallpapersError(null);
+    try {
+      const res = await fetchWallpapersFromSupabase();
+      if (res.error) {
+        setWallpapersError(res.error);
+      }
+
+      if (res.configured && !res.error) {
+        const deletedIds = getDeletedWallpaperIds();
+        const cloudItems = res.wallpapers.filter((w) => !deletedIds.has(w.id));
+
+        setWallpapers((prev) => {
+          const prevClean = prev.filter((w) => !deletedIds.has(w.id));
+          if (cloudItems.length === 0) return prevClean;
+
+          const cloudMap = new Map(cloudItems.map((item) => [item.id, item]));
+          const mergedPrev = prevClean.map((localItem) => {
+            const cloudMatch = cloudMap.get(localItem.id);
+            if (!cloudMatch) return localItem;
+            return {
+              ...localItem,
+              ...cloudMatch,
+              url: cloudMatch.url || localItem.url,
+              videoUrl: cloudMatch.videoUrl || localItem.videoUrl,
+              posterUrl: cloudMatch.posterUrl || localItem.posterUrl,
+              thumbnailUrl: cloudMatch.thumbnailUrl || localItem.thumbnailUrl,
+            };
+          });
+
+          const existingIds = new Set(prevClean.map((w) => w.id));
+          const newFromCloud = cloudItems.filter((w) => !existingIds.has(w.id));
+          return [...newFromCloud, ...mergedPrev];
+        });
+      }
+    } catch (err: any) {
+      setWallpapersError(err?.message || 'Unable to reach wallpaper database.');
+    } finally {
+      isWallpapersHydratedRef.current = true;
+      setWallpapersLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
 
-    // Hydrate Custom Wallpapers
-    loadCustomWallpapersFromIndexedDB().then((customItems) => {
-      if (!isMounted) return;
-      isWallpapersHydratedRef.current = true;
-      const deletedIds = getDeletedWallpaperIds();
+    // Hydrate Custom Wallpapers from IndexedDB
+    loadCustomWallpapersFromIndexedDB()
+      .then((customItems) => {
+        if (!isMounted) return;
+        isWallpapersHydratedRef.current = true;
+        const deletedIds = getDeletedWallpaperIds();
 
-      setWallpapers((prev) => {
-        const prevClean = prev.filter((w) => !deletedIds.has(w.id));
-        if (!customItems || customItems.length === 0) return prevClean;
+        setWallpapers((prev) => {
+          const prevClean = prev.filter((w) => !deletedIds.has(w.id));
+          if (!customItems || customItems.length === 0) return prevClean;
 
-        const filteredCustom = customItems.filter((w) => !deletedIds.has(w.id));
-        const customMap = new Map(filteredCustom.map((item) => [item.id, item]));
-        let hasChanges = prevClean.length !== prev.length;
+          const filteredCustom = customItems.filter((w) => !deletedIds.has(w.id));
+          const customMap = new Map(filteredCustom.map((item) => [item.id, item]));
+          let hasChanges = prevClean.length !== prev.length;
 
-        const updated = prevClean.map((item) => {
-          const fromDb = customMap.get(item.id);
-          if (fromDb) {
-            if (
-              fromDb.url !== item.url ||
-              fromDb.posterUrl !== item.posterUrl ||
-              fromDb.videoUrl !== item.videoUrl
-            ) {
-              hasChanges = true;
+          const updated = prevClean.map((item) => {
+            const fromDb = customMap.get(item.id);
+            if (fromDb) {
+              if (
+                fromDb.url !== item.url ||
+                fromDb.posterUrl !== item.posterUrl ||
+                fromDb.videoUrl !== item.videoUrl
+              ) {
+                hasChanges = true;
+              }
+              return {
+                ...item,
+                ...fromDb,
+                url: fromDb.url || item.url,
+                posterUrl: fromDb.posterUrl || item.posterUrl,
+                videoUrl: fromDb.videoUrl || item.videoUrl,
+              };
             }
-            return {
-              ...item,
-              ...fromDb,
-              url: fromDb.url || item.url,
-              posterUrl: fromDb.posterUrl || item.posterUrl,
-              videoUrl: fromDb.videoUrl || item.videoUrl,
-            };
-          }
-          return item;
+            return item;
+          });
+
+          const existingIds = new Set(prevClean.map((w) => w.id));
+          const missingFromPrev = filteredCustom.filter((w) => !existingIds.has(w.id));
+          if (missingFromPrev.length > 0) hasChanges = true;
+
+          if (!hasChanges) return prevClean;
+          return [...missingFromPrev, ...updated];
         });
-
-        const existingIds = new Set(prevClean.map((w) => w.id));
-        const missingFromPrev = filteredCustom.filter((w) => !existingIds.has(w.id));
-        if (missingFromPrev.length > 0) hasChanges = true;
-
-        if (!hasChanges) return prevClean;
-        return [...missingFromPrev, ...updated];
+      })
+      .catch(() => {
+        if (isMounted) isWallpapersHydratedRef.current = true;
       });
-    });
+
+    // Hydrate from Supabase public.wallpapers (if configured)
+    loadWallpapersFromCloud();
 
     // Hydrate Custom Blog Posts (Data Safety Protocol)
-    loadCustomBlogPostsFromIndexedDB().then((customPosts) => {
-      if (!isMounted) return;
-      isBlogHydratedRef.current = true;
-      const deletedIds = getDeletedBlogPostIds();
+    loadCustomBlogPostsFromIndexedDB()
+      .then((customPosts) => {
+        if (!isMounted) return;
+        isBlogHydratedRef.current = true;
+        const deletedIds = getDeletedBlogPostIds();
 
-      setBlogPosts((prev) => {
-        const prevClean = prev.filter((p) => !deletedIds.has(p.id));
-        if (!customPosts || customPosts.length === 0) return prevClean;
+        setBlogPosts((prev) => {
+          const prevClean = prev.filter((p) => !deletedIds.has(p.id));
+          if (!customPosts || customPosts.length === 0) return prevClean;
 
-        const filteredCustom = customPosts.filter((p) => !deletedIds.has(p.id));
-        const customMap = new Map(filteredCustom.map((item) => [item.id, item]));
-        let hasChanges = prevClean.length !== prev.length;
+          const filteredCustom = customPosts.filter((p) => !deletedIds.has(p.id));
+          const customMap = new Map(filteredCustom.map((item) => [item.id, item]));
+          let hasChanges = prevClean.length !== prev.length;
 
-        const updated = prevClean.map((item) => {
-          const fromDb = customMap.get(item.id);
-          if (fromDb) {
-            hasChanges = true;
-            return {
-              ...item,
-              ...fromDb,
-            };
-          }
-          return item;
+          const updated = prevClean.map((item) => {
+            const fromDb = customMap.get(item.id);
+            if (fromDb) {
+              hasChanges = true;
+              return {
+                ...item,
+                ...fromDb,
+              };
+            }
+            return item;
+          });
+
+          const existingIds = new Set(prevClean.map((p) => p.id));
+          const missingFromPrev = filteredCustom.filter((p) => !existingIds.has(p.id));
+          if (missingFromPrev.length > 0) hasChanges = true;
+
+          if (!hasChanges) return prevClean;
+          return [...missingFromPrev, ...updated];
         });
-
-        const existingIds = new Set(prevClean.map((p) => p.id));
-        const missingFromPrev = filteredCustom.filter((p) => !existingIds.has(p.id));
-        if (missingFromPrev.length > 0) hasChanges = true;
-
-        if (!hasChanges) return prevClean;
-        return [...missingFromPrev, ...updated];
+      })
+      .catch(() => {
+        if (isMounted) isBlogHydratedRef.current = true;
       });
-    });
 
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [loadWallpapersFromCloud]);
 
   // Helper to strictly identify Mobile 9:16 Wallpapers
   const isMobileWallpaper = (w: Wallpaper): boolean => {
+    const safeTags = Array.isArray(w?.tags) ? w.tags : [];
     return Boolean(
       w.deviceFormat === 'mobile' ||
       w.aspectRatio === '9:16' ||
       w.isMobile === true ||
       w.category === 'Mobile' ||
       (w.width && w.height && w.height > w.width) ||
-      w.tags?.some((t) => {
-        const lower = t.toLowerCase();
+      safeTags.some((t) => {
+        const lower = String(t || '').toLowerCase();
         return (
           lower.includes('mobile live') ||
           lower.includes('9:16') ||
@@ -277,7 +345,11 @@ export default function App() {
 
   // Sync Language, Direction, and Dynamic SEO Meta Tags for Googlebot
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.LANG, lang);
+    try {
+      localStorage.setItem(STORAGE_KEYS.LANG, lang);
+    } catch {
+      // ignore storage errors in restricted environments
+    }
     document.documentElement.lang = lang;
     document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
 
@@ -285,7 +357,7 @@ export default function App() {
     let pageDesc = '';
 
     if (activeWallpaper) {
-      const wpTitle = activeWallpaper.title[lang] || activeWallpaper.title.en;
+      const wpTitle = activeWallpaper.title?.[lang] || activeWallpaper.title?.en || activeWallpaper.title?.ar || '4K Wallpaper';
       pageTitle = `${wpTitle} - 4K Ultra HD Wallpaper · DeskSpace4K`;
       pageDesc =
         lang === 'ar'
@@ -483,6 +555,7 @@ export default function App() {
 
   // Toggle Favorite
   const handleToggleFavorite = (wallpaperId: string) => {
+    const target = wallpapersRef.current.find((w) => w.id === wallpaperId);
     if (currentUser) {
       const exists = currentUser.favorites.includes(wallpaperId);
       const newFavs = exists
@@ -494,11 +567,13 @@ export default function App() {
         favorites: newFavs,
       });
 
+      const nextCount = Math.max(0, (Number(target?.favorites) || 0) + (exists ? -1 : 1));
       setWallpapers((prev) =>
         prev.map((w) =>
-          w.id === wallpaperId ? { ...w, favorites: Math.max(0, w.favorites + (exists ? -1 : 1)) } : w
+          w.id === wallpaperId ? { ...w, favorites: Math.max(0, (Number(w.favorites) || 0) + (exists ? -1 : 1)) } : w
         )
       );
+      syncWallpaperStats(wallpaperId, { favorites: nextCount });
     } else {
       const exists = guestFavorites.includes(wallpaperId);
       const newFavs = exists
@@ -507,25 +582,29 @@ export default function App() {
 
       setGuestFavorites(newFavs);
 
+      const nextCount = Math.max(0, (Number(target?.favorites) || 0) + (exists ? -1 : 1));
       setWallpapers((prev) =>
         prev.map((w) =>
-          w.id === wallpaperId ? { ...w, favorites: Math.max(0, w.favorites + (exists ? -1 : 1)) } : w
+          w.id === wallpaperId ? { ...w, favorites: Math.max(0, (Number(w.favorites) || 0) + (exists ? -1 : 1)) } : w
         )
       );
+      syncWallpaperStats(wallpaperId, { favorites: nextCount });
     }
   };
 
   // Record Download
   const handleRecordDownload = (wallpaper: Wallpaper, resolutionStr: string) => {
+    const nextDownloads = (Number(wallpaper.downloads) || 0) + 1;
     setWallpapers((prev) =>
-      prev.map((w) => (w.id === wallpaper.id ? { ...w, downloads: w.downloads + 1 } : w))
+      prev.map((w) => (w.id === wallpaper.id ? { ...w, downloads: (Number(w.downloads) || 0) + 1 } : w))
     );
+    syncWallpaperStats(wallpaper.id, { downloads: nextDownloads });
 
     if (currentUser) {
       const historyItem = {
         id: `dl_${Date.now()}`,
         wallpaperId: wallpaper.id,
-        wallpaperTitle: wallpaper.title[lang] || wallpaper.title.en,
+        wallpaperTitle: wallpaper.title?.[lang] || wallpaper.title?.en || wallpaper.title?.ar || '4K Wallpaper',
         wallpaperUrl: wallpaper.url,
         resolution: resolutionStr,
         downloadedAt: new Date().toISOString(),
@@ -576,18 +655,20 @@ export default function App() {
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       result = result.filter((w) => {
-        const titleEn = w.title.en.toLowerCase();
-        const titleAr = w.title.ar.toLowerCase();
-        const cat = w.category.toLowerCase();
-        const tags = w.tags.join(' ').toLowerCase();
+        const titleEn = String(w.title?.en || '').toLowerCase();
+        const titleAr = String(w.title?.ar || '').toLowerCase();
+        const cat = String(w.category || '').toLowerCase();
+        const tags = (Array.isArray(w.tags) ? w.tags : []).join(' ').toLowerCase();
         return titleEn.includes(q) || titleAr.includes(q) || cat.includes(q) || tags.includes(q);
       });
     }
 
     result.sort((a, b) => {
-      if (sortBy === 'popular') return b.downloads - a.downloads;
-      if (sortBy === 'favorites') return b.favorites - a.favorites;
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      if (sortBy === 'popular') return (Number(b.downloads) || 0) - (Number(a.downloads) || 0);
+      if (sortBy === 'favorites') return (Number(b.favorites) || 0) - (Number(a.favorites) || 0);
+      const timeB = Date.parse(b.createdAt || '') || 0;
+      const timeA = Date.parse(a.createdAt || '') || 0;
+      return timeB - timeA;
     });
 
     return result;
@@ -796,6 +877,8 @@ export default function App() {
   }, []);
 
   const handleDeleteWallpaper = useCallback(async (id: string) => {
+    const targetWp = wallpapersRef.current.find((w) => w.id === id);
+
     // 1. Immediately synchronize React state so UI updates instantly
     setWallpapers((prev) => prev.filter((w) => w.id !== id));
 
@@ -814,8 +897,13 @@ export default function App() {
 
     setGuestFavorites((prev) => prev.filter((fid) => fid !== id));
 
-    // 2. Commit permanent deletion to IndexedDB and mark in deleted store
-    return permanentlyDeleteWallpaperFromIndexedDB(id);
+    // 2. Commit permanent deletion to Supabase Storage/Database & IndexedDB
+    try {
+      const res = await deleteWallpaperWithSync(targetWp || id);
+      return res;
+    } catch {
+      return permanentlyDeleteWallpaperFromIndexedDB(id);
+    }
   }, []);
 
   const handleResetDefaults = useCallback(() => {
@@ -942,6 +1030,9 @@ export default function App() {
                 setSelectedCategory('All');
                 navigate('/');
               }}
+              isLoading={wallpapersLoading}
+              error={wallpapersError}
+              onRetry={loadWallpapersFromCloud}
             />
           </ErrorBoundary>
         </main>
@@ -1113,26 +1204,52 @@ export default function App() {
               </div>
             </div>
 
-            {/* Desktop Wallpaper Grid - 2 columns on mobile, 3 on lg, 4 on xl */}
-            {filteredDesktopWallpapers.length === 0 ? (
-              <div className="py-20 text-center rounded-2xl bg-[#14151B] border border-[#232532] p-8 max-w-md mx-auto">
-                <Search className="w-12 h-12 text-neutral-600 mx-auto mb-3" />
-                <h3 className="text-base font-bold text-white mb-1">
-                  {t.noWallpapersFound}
-                </h3>
-                <p className="text-xs text-neutral-400 mb-4">
-                  Try adjusting your search terms or clearing the current category filters.
-                </p>
+            {/* Non-crashing Cloud Fetch Error Banner */}
+            {wallpapersError && (
+              <div className="mb-6 p-4 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-start sm:items-center gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5 sm:mt-0" />
+                  <span>
+                    {lang === 'ar'
+                      ? `تعذر تحديث الخلفيات من الخادم: ${wallpapersError}`
+                      : `Could not refresh wallpapers from database: ${wallpapersError}`}
+                  </span>
+                </div>
                 <button
-                  onClick={() => {
-                    setSearchQuery('');
-                    setSelectedCategory('All');
-                  }}
-                  className="px-4 py-2.5 min-h-[44px] rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-xs shadow-md transition-colors cursor-pointer touch-manipulation"
+                  type="button"
+                  onClick={loadWallpapersFromCloud}
+                  className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-200 font-bold transition-colors cursor-pointer shrink-0"
                 >
-                  {t.clearFilters}
+                  <RefreshCw className={`w-3.5 h-3.5 ${wallpapersLoading ? 'animate-spin' : ''}`} />
+                  <span>{lang === 'ar' ? 'إعادة المحاولة' : 'Retry'}</span>
                 </button>
               </div>
+            )}
+
+            {/* Desktop Wallpaper Grid - 2 columns on mobile, 3 on lg, 4 on xl */}
+            {wallpapersLoading && desktopWallpapers.length === 0 ? (
+              <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-5 lg:gap-6">
+                {Array.from({ length: 8 }).map((_, idx) => (
+                  <div
+                    key={idx}
+                    className="aspect-video rounded-xl sm:rounded-2xl bg-[#15161E] border border-[#222432] animate-pulse p-4 flex flex-col justify-end gap-2"
+                  >
+                    <div className="w-2/3 h-3 rounded bg-white/10" />
+                    <div className="w-1/3 h-2.5 rounded bg-white/5" />
+                  </div>
+                ))}
+              </div>
+            ) : filteredDesktopWallpapers.length === 0 ? (
+              <EmptyState
+                mode="desktop"
+                lang={lang}
+                isFilterEmpty={desktopWallpapers.length > 0}
+                searchQuery={searchQuery}
+                onClearFilters={() => {
+                  setSearchQuery('');
+                  setSelectedCategory('All');
+                }}
+              />
             ) : (
               <>
                 <ErrorBoundary isSection fallbackTitle={lang === 'ar' ? 'معرض خلفيات سطح المكتب' : 'Desktop 4K Wallpaper Gallery'}>
@@ -1300,12 +1417,14 @@ export default function App() {
             onUpdateWallpaper={handleUpdateWallpaper}
             onDeleteWallpaper={handleDeleteWallpaper}
             onResetDefaults={handleResetDefaults}
-            totalDownloads={wallpapers.reduce((sum, w) => sum + w.downloads, 0)}
+            totalDownloads={wallpapers.reduce((sum, w) => sum + (Number(w.downloads) || 0), 0)}
             totalUsers={currentUser ? 1 : 0}
             blogPosts={blogPosts}
             onAddBlogPost={handleAddBlogPost}
             onUpdateBlogPost={handleUpdateBlogPost}
             onDeleteBlogPost={handleDeleteBlogPost}
+            onRefreshFromCloud={loadWallpapersFromCloud}
+            cloudSyncError={wallpapersError}
           />
         </React.Suspense>
       )}

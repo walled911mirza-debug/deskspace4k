@@ -16,6 +16,8 @@ import {
   Apple,
   Check,
   Info,
+  AlertTriangle,
+  RotateCcw,
 } from 'lucide-react';
 import { Wallpaper, Language } from '../types';
 import { translations } from '../translations';
@@ -33,6 +35,9 @@ interface MobileLiveSectionProps {
   onOpenDownloadModal: (wallpaper: Wallpaper) => void;
   onOpenDetails: (wallpaper: Wallpaper) => void;
   onBackToDesktop: () => void;
+  isLoading?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
 }
 
 export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
@@ -43,6 +48,9 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
   onOpenDownloadModal,
   onOpenDetails,
   onBackToDesktop,
+  isLoading = false,
+  error = null,
+  onRetry,
 }) => {
   const [resFilter, setResFilter] = useState<'all' | '4k' | 'fhd'>('all');
   const [topicFilter, setTopicFilter] = useState<string>('all');
@@ -65,23 +73,24 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
 
   // Filter & Sort Mobile Wallpapers
   const filteredWallpapers = useMemo(() => {
-    let result = [...wallpapers];
+    const safeList = Array.isArray(wallpapers) ? wallpapers : [];
+    let result = [...safeList];
 
     // 1. Resolution filter
     if (resFilter === '4k') {
       result = result.filter(
         (w) =>
-          w.height >= 2160 ||
-          w.width >= 2160 ||
-          w.resolution.includes('2160') ||
-          w.resolution.includes('4K')
+          (w.height || 0) >= 2160 ||
+          (w.width || 0) >= 2160 ||
+          (w.resolution || '').includes('2160') ||
+          (w.resolution || '').includes('4K')
       );
     } else if (resFilter === 'fhd') {
       result = result.filter(
         (w) =>
           (w.width === 1080 && w.height === 1920) ||
-          w.resolution.includes('1080') ||
-          w.resolution.includes('FHD')
+          (w.resolution || '').includes('1080') ||
+          (w.resolution || '').includes('FHD')
       );
     }
 
@@ -90,7 +99,7 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
       const tf = topicFilter.toLowerCase();
       result = result.filter((w) => {
         const cat = (w.category || '').toLowerCase();
-        const tags = (w.tags || []).map((t) => t.toLowerCase());
+        const tags = (Array.isArray(w.tags) ? w.tags : []).map((t) => String(t).toLowerCase());
         const titleEn = (w.title?.en || '').toLowerCase();
         const titleAr = (w.title?.ar || '').toLowerCase();
         return cat === tf || tags.includes(tf) || titleEn.includes(tf) || titleAr.includes(tf);
@@ -104,16 +113,16 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
         const titleEn = (w.title?.en || '').toLowerCase();
         const titleAr = (w.title?.ar || '').toLowerCase();
         const cat = (w.category || '').toLowerCase();
-        const tags = (w.tags || []).join(' ').toLowerCase();
+        const tags = (Array.isArray(w.tags) ? w.tags : []).join(' ').toLowerCase();
         return titleEn.includes(q) || titleAr.includes(q) || cat.includes(q) || tags.includes(q);
       });
     }
 
     // 4. Sort
     result.sort((a, b) => {
-      if (sortBy === 'popular') return b.downloads - a.downloads;
-      if (sortBy === 'favorites') return b.favorites - a.favorites;
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      if (sortBy === 'popular') return (Number(b.downloads) || 0) - (Number(a.downloads) || 0);
+      if (sortBy === 'favorites') return (Number(b.favorites) || 0) - (Number(a.favorites) || 0);
+      return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
     });
 
     return result;
@@ -396,7 +405,42 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
       {/* 3. Dedicated 9:16 Portrait Wallpaper Grid */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div ref={mobileGridTopRef} className="scroll-mt-28" />
-        {filteredWallpapers.length === 0 ? (
+
+        {error && (
+          <div className="mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>{error}</span>
+            </div>
+            {onRetry && (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-bold text-xs cursor-pointer shrink-0"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>{lang === 'ar' ? 'إعادة المحاولة' : 'Retry'}</span>
+              </button>
+            )}
+          </div>
+        )}
+
+        {isLoading && wallpapers.length === 0 ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 lg:gap-5">
+            {Array.from({ length: 12 }).map((_, idx) => (
+              <div
+                key={idx}
+                className="rounded-xl sm:rounded-2xl bg-[#16171E] border border-[#242634] overflow-hidden animate-pulse"
+              >
+                <div className="aspect-[9/16] bg-[#12131A]" />
+                <div className="p-3 space-y-2">
+                  <div className="h-3 bg-[#222432] rounded w-3/4" />
+                  <div className="h-2.5 bg-[#1D1F2B] rounded w-1/2" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : filteredWallpapers.length === 0 ? (
           <EmptyState
             mode="mobile"
             lang={lang}

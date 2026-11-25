@@ -173,7 +173,7 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
 
   const t = translations[lang];
   const selectedRes = RESOLUTION_OPTIONS.find((r) => r.id === selectedResId) || RESOLUTION_OPTIONS[0];
-  const rawTitle = wallpaper.title[lang] || wallpaper.title.en;
+  const rawTitle = wallpaper.title?.[lang] || wallpaper.title?.en || wallpaper.title?.ar || '4K Wallpaper';
   const currentTitle = cleanWallpaperTitle(rawTitle);
 
   const handleDownload = async () => {

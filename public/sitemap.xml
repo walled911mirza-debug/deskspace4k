@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <!-- Main Homepage & 4K Desktop Wallpaper Gallery -->
+  <url>
+    <loc>https://deskspace4k.com/</loc>
+    <lastmod>2026-11-12</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+    <image:image>
+      <image:loc>https://deskspace4k.com/wallpapers/wallpaper_space_nebula_1792241809155.jpg</image:loc>
+      <image:title>Deep Space Nebula &amp; Starlight 4K</image:title>
+      <image:caption>Ultra high definition 4K deep space cosmic nebula wallpaper calibrated for OLED and HDR displays (3840x2160).</image:caption>
+    </image:image>
+    <image:image>
+      <image:loc>https://deskspace4k.com/wallpapers/wallpaper_nature_mountains_1792241809437.jpg</image:loc>
+      <image:title>Alpine Peaks &amp; Sunset Horizon 4K</image:title>
+      <image:caption>Majestic snow-capped alpine mountains glowing under a serene golden hour sunset in 4K Ultra HD (3840x2160).</image:caption>
+    </image:image>
+    <image:image>
+      <image:loc>https://deskspace4k.com/wallpapers/wallpaper_gaming_cyberpunk_1792241811144.jpg</image:loc>
+      <image:title>Cyberpunk Nightfall Neon City 4K</image:title>
+      <image:caption>High-octane futuristic cyberpunk cityscape bathed in neon cyan and magenta illumination (3840x2160).</image:caption>
+    </image:image>
+    <image:image>
+      <image:loc>https://deskspace4k.com/wallpapers/wallpaper_supercar_neon_1792241811336.jpg</image:loc>
+      <image:title>Neon Hypercar Cyber Speed 4K</image:title>
+      <image:caption>Aggressive aerodynamic hypercar silhouette on a neon-lit futuristic speedway in 4K resolution (3840x2160).</image:caption>
+    </image:image>
+    <image:image>
+      <image:loc>https://deskspace4k.com/wallpapers/wallpaper_anime_scenery_1792241811689.jpg</image:loc>
+      <image:title>Ethereal Sunset Anime Sky &amp; Torii 4K</image:title>
+      <image:caption>Dreamy anime twilight scenery featuring dramatic cloud formations and traditional shrine gate silhouette (3840x2160).</image:caption>
+    </image:image>
+  </url>
+
+  <!-- Mobile Live Wallpapers Hub (9:16 Vertical) -->
+  <url>
+    <loc>https://deskspace4k.com/mobile-live</loc>
+    <lastmod>2026-11-12</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.9</priority>
+    <image:image>
+      <image:loc>https://deskspace4k.com/wallpapers/wallpaper_space_nebula_1792241809155.jpg</image:loc>
+      <image:title>Mobile Deep Space Nebula 4K (9:16)</image:title>
+      <image:caption>Vertical 9:16 portrait Ultra HD wallpaper tailored for iPhone and Android lockscreens.</image:caption>
+    </image:image>
+    <image:image>
+      <image:loc>https://deskspace4k.com/wallpapers/wallpaper_gaming_cyberpunk_1792241811144.jpg</image:loc>
+      <image:title>Mobile Cyberpunk Neon City 4K (9:16)</image:title>
+      <image:caption>Vertical neon-drenched cyberpunk corridor optimized for mobile AMOLED screens.</image:caption>
+    </image:image>
+    <image:image>
+      <image:loc>https://deskspace4k.com/wallpapers/wallpaper_anime_scenery_1792241811689.jpg</image:loc>
+      <image:title>Mobile Anime Twilight Horizon 4K (9:16)</image:title>
+      <image:caption>Vertical anime twilight aesthetic with starry sky crafted for smartphone lockscreens.</image:caption>
+    </image:image>
+  </url>
+
+  <!-- Mobile Route Alias -->
+  <url>
+    <loc>https://deskspace4k.com/mobile</loc>
+    <lastmod>2026-11-12</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.8</priority>
+  </url>
+
+  <!-- DeskSpace Journal & Display Guides -->
+  <url>
+    <loc>https://deskspace4k.com/blog</loc>
+    <lastmod>2026-10-17</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+    <image:image>
+      <image:loc>https://deskspace4k.com/wallpapers/wallpaper_space_nebula_1792241809155.jpg</image:loc>
+      <image:title>How to Choose the Best 4K Wallpapers for OLED &amp; IPS Displays to Minimize Eye Strain</image:title>
+      <image:caption>In-depth guide on display physics, contrast ratios, and chromatic calibration.</image:caption>
+    </image:image>
+    <image:image>
+      <image:loc>https://deskspace4k.com/wallpapers/wallpaper_nature_mountains_1792241809437.jpg</image:loc>
+      <image:title>Optimal Monitor Settings &amp; Dynamic Wallpapers to Boost Workplace Focus</image:title>
+      <image:caption>Display scaling ratios, color temperature targets, and tranquil dynamic visual anchors.</image:caption>
+    </image:image>
+    <image:image>
+      <image:loc>https://deskspace4k.com/wallpapers/wallpaper_gaming_cyberpunk_1792241811144.jpg</image:loc>
+      <image:title>Static vs. Animated Live Wallpapers: System Performance Benchmarks</image:title>
+      <image:caption>Hardware video decoding, VRAM consumption, and frame pacing benchmarks.</image:caption>
+    </image:image>
+  </url>
+
+  <!-- Individual Desktop 4K Wallpaper Detail Pages -->
+  <url>
+    <loc>https://deskspace4k.com/wallpaper/deep-space-nebula-starlight-4k</loc>
+    <lastmod>2026-10-15</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+    <image:image>
+      <image:loc>https://deskspace4k.com/wallpapers/wallpaper_space_nebula_1792241809155.jpg</image:loc>
+      <image:title>Deep Space Nebula &amp; Starlight 4K</image:title>
+      <image:caption>3840x2160 16:9 Space Ultra HD Wallpaper calibrated for OLED and HDR displays.</image:caption>
+    </image:image>
+  </url>
+
+  <url>
+    <loc>https://deskspace4k.com/wallpaper/alpine-peaks-sunset-horizon-4k</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+    <image:image>
+      <image:loc>https://deskspace4k.com/wallpapers/wallpaper_nature_mountains_1792241809437.jpg</image:loc>
+      <image:title>Alpine Peaks &amp; Sunset Horizon 4K</image:title>
+      <image:caption>3840x2160 16:9 Nature Mountain Sunset Wallpaper in 4K dynamic range.</image:caption>
+    </image:image>
+  </url>
+
+  <url>
+    <loc>https://deskspace4k.com/wallpaper/cyberpunk-nightfall-neon-city-4k</loc>
+    <lastmod>2026-10-17</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+    <image:image>
+      <image:loc>https://deskspace4k.com/wallpapers/wallpaper_gaming_cyberpunk_1792241811144.jpg</image:loc>
+      <image:title>Cyberpunk Nightfall Neon City 4K</image:title>
+      <image:caption>3840x2160 16:9 Gaming Cyberpunk Neon Cityscape 4K Wallpaper.</image:caption>
+    </image:image>
+  </url>
+
+  <url>
+    <loc>https://deskspace4k.com/wallpaper/neon-hypercar-cyber-speed-4k</loc>
+    <lastmod>2026-10-18</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+    <image:image>
+      <image:loc>https://deskspace4k.com/wallpapers/wallpaper_supercar_neon_1792241811336.jpg</image:loc>
+      <image:title>Neon Hypercar Cyber Speed 4K</image:title>
+      <image:caption>3840x2160 16:9 Supercar Automotive Neon Reflections 4K Wallpaper.</image:caption>
+    </image:image>
+  </url>
+
+  <url>
+    <loc>https://deskspace4k.com/wallpaper/ethereal-sunset-anime-sky-torii-4k</loc>
+    <lastmod>2026-10-19</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+    <image:image>
+      <image:loc>https://deskspace4k.com/wallpapers/wallpaper_anime_scenery_1792241811689.jpg</image:loc>
+      <image:title>Ethereal Sunset Anime Sky &amp; Torii 4K</image:title>
+      <image:caption>3840x2160 16:9 Anime Twilight Scenery &amp; Torii Gate 4K Wallpaper.</image:caption>
+    </image:image>
+  </url>
+
+  <!-- Individual Mobile 4K Live Wallpaper Detail Pages (9:16 Portrait) -->
+  <url>
+    <loc>https://deskspace4k.com/wallpaper/mobile-deep-space-nebula-portrait-4k</loc>
+    <lastmod>2026-10-20</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <image:image>
+      <image:loc>https://deskspace4k.com/wallpapers/wallpaper_space_nebula_1792241809155.jpg</image:loc>
+      <image:title>Mobile Deep Space Nebula 4K</image:title>
+      <image:caption>2160x3840 9:16 Portrait Mobile Live Wallpaper for iPhone &amp; Android.</image:caption>
+    </image:image>
+  </url>
+
+  <url>
+    <loc>https://deskspace4k.com/wallpaper/mobile-cyberpunk-neon-city-portrait-4k</loc>
+    <lastmod>2026-10-21</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <image:image>
+      <image:loc>https://deskspace4k.com/wallpapers/wallpaper_gaming_cyberpunk_1792241811144.jpg</image:loc>
+      <image:title>Mobile Cyberpunk Neon City 4K</image:title>
+      <image:caption>2160x3840 9:16 Portrait Mobile Live Wallpaper optimized for AMOLED displays.</image:caption>
+    </image:image>
+  </url>
+
+  <url>
+    <loc>https://deskspace4k.com/wallpaper/mobile-anime-twilight-horizon-portrait-4k</loc>
+    <lastmod>2026-10-22</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <image:image>
+      <image:loc>https://deskspace4k.com/wallpapers/wallpaper_anime_scenery_1792241811689.jpg</image:loc>
+      <image:title>Mobile Anime Twilight Horizon 4K</image:title>
+      <image:caption>2160x3840 9:16 Portrait Anime Mobile Live Wallpaper.</image:caption>
+    </image:image>
+  </url>
+
+  <url>
+    <loc>https://deskspace4k.com/wallpaper/mobile-alpine-sunset-glow-portrait-4k</loc>
+    <lastmod>2026-10-23</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <image:image>
+      <image:loc>https://deskspace4k.com/wallpapers/wallpaper_nature_mountains_1792241809437.jpg</image:loc>
+      <image:title>Mobile Alpine Sunset Glow 4K</image:title>
+      <image:caption>2160x3840 9:16 Portrait Nature Mobile Live Wallpaper.</image:caption>
+    </image:image>
+  </url>
+
+  <url>
+    <loc>https://deskspace4k.com/wallpaper/mobile-neon-supercar-apex-portrait-4k</loc>
+    <lastmod>2026-10-24</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <image:image>
+      <image:loc>https://deskspace4k.com/wallpapers/wallpaper_supercar_neon_1792241811336.jpg</image:loc>
+      <image:title>Mobile Neon Supercar Apex 4K</image:title>
+      <image:caption>2160x3840 9:16 Portrait Supercar Mobile Live Wallpaper.</image:caption>
+    </image:image>
+  </url>
+</urlset>

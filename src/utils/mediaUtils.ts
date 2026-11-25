@@ -58,11 +58,12 @@ export function isVideoUrl(url: string | undefined): boolean {
 export function normalizeMediaUrl(url: string | undefined, category: string = 'Space'): string {
   if (!url) return getCategoryFallback(category);
 
-  if (url.includes('wallpaper_space_nebula')) return spaceNebulaImg;
-  if (url.includes('wallpaper_nature_mountains')) return natureMountainsImg;
-  if (url.includes('wallpaper_gaming_cyberpunk')) return gamingCyberpunkImg;
-  if (url.includes('wallpaper_supercar_neon')) return supercarNeonImg;
-  if (url.includes('wallpaper_anime_scenery')) return animeSceneryImg;
+  if (url.startsWith('/wallpapers/')) return url;
+  if (url.includes('wallpaper_space_nebula')) return '/wallpapers/wallpaper_space_nebula_1792241809155.jpg';
+  if (url.includes('wallpaper_nature_mountains')) return '/wallpapers/wallpaper_nature_mountains_1792241809437.jpg';
+  if (url.includes('wallpaper_gaming_cyberpunk')) return '/wallpapers/wallpaper_gaming_cyberpunk_1792241811144.jpg';
+  if (url.includes('wallpaper_supercar_neon')) return '/wallpapers/wallpaper_supercar_neon_1792241811336.jpg';
+  if (url.includes('wallpaper_anime_scenery')) return '/wallpapers/wallpaper_anime_scenery_1792241811689.jpg';
 
   // Stale blob URL from a previous browser session (browser revokes blob: on reload)
   if (url.startsWith('blob:') && !activeBlobRegistry.has(url)) {

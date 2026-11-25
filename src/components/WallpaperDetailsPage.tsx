@@ -52,7 +52,8 @@ import {
 } from '../utils/mediaUtils';
 import { safeResolveMediaUrl, getDarkNeonPlaceholder } from '../utils/safeBlobLoader';
 import { cleanWallpaperTitle, extractResolutionFromTitle } from '../utils/titleSanitizer';
-import { getWallpaperByIdOrSlug, matchesIdOrSlug } from '../utils/storageManager';
+import { matchesIdOrSlug } from '../utils/storageManager';
+import { fetchWallpaperByIdOrSlug } from '../lib/wallpapersService';
 import { AdSenseUnit } from './AdSenseUnit';
 
 interface ResolutionOption {
@@ -154,6 +155,8 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
     return !(initialWallpaper && routeIdentifier && matchesIdOrSlug(initialWallpaper, routeIdentifier));
   });
   const [notFound, setNotFound] = useState<boolean>(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState<number>(0);
 
   const [selectedResId, setSelectedResId] = useState<string>('4k');
   const [isResDropdownOpen, setIsResDropdownOpen] = useState(false);
@@ -252,7 +255,7 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
             isVideoUrl(targetWp.videoUrl))
       );
 
-      const rawTitleStr = targetWp.title[lang] || targetWp.title.en;
+      const rawTitleStr = targetWp.title?.[lang] || targetWp.title?.en || targetWp.title?.ar || '4K Wallpaper';
       const cleanTitleStr = cleanWallpaperTitle(rawTitleStr);
       const rawTarget = targetWp.posterUrl || targetWp.thumbnailUrl || (isLive ? undefined : targetWp.url);
       const initialPreview = getOptimizedPreviewUrl(rawTarget, 1920, targetWp.category);
@@ -279,30 +282,53 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
         setResolvedVideoSource('');
       }
 
-      window.scrollTo({ top: 0, behavior: 'instant' });
+      try {
+        window.scrollTo({ top: 0, behavior: 'instant' });
+      } catch {
+        window.scrollTo(0, 0);
+      }
     };
 
     // If initialWallpaper prop matches routeIdentifier, apply immediately
     if (initialWallpaper && matchesIdOrSlug(initialWallpaper, routeIdentifier)) {
+      setFetchError(null);
       applyWallpaperRecord(initialWallpaper);
       return;
     }
 
     // Dynamic Parameter Extraction & Exact Matching:
-    // Fetch and display the exact record from IndexedDB or state where item.id === routeId or item.slug === routeSlug
+    // Fetch and display the exact record from local cache or Supabase public.wallpapers
     setIsLoading(true);
     setNotFound(false);
+    setFetchError(null);
 
-    getWallpaperByIdOrSlug(routeIdentifier, allWallpapers).then((found) => {
-      if (!isMounted) return;
-      if (!found) {
+    fetchWallpaperByIdOrSlug(routeIdentifier, allWallpapers)
+      .then(({ wallpaper: found, error }) => {
+        if (!isMounted) return;
+        if (error && !found) {
+          setActiveWallpaper(null);
+          setIsLoading(false);
+          setFetchError(error);
+          setNotFound(false);
+          return;
+        }
+        if (!found) {
+          setActiveWallpaper(null);
+          setIsLoading(false);
+          setFetchError(null);
+          setNotFound(true);
+          return;
+        }
+        setFetchError(null);
+        applyWallpaperRecord(found);
+      })
+      .catch((err: any) => {
+        if (!isMounted) return;
         setActiveWallpaper(null);
         setIsLoading(false);
-        setNotFound(true);
-        return;
-      }
-      applyWallpaperRecord(found);
-    });
+        setFetchError(err?.message || 'Unable to load wallpaper details.');
+        setNotFound(false);
+      });
 
     return () => {
       isMounted = false;
@@ -316,13 +342,13 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
         }
       }
     };
-  }, [routeIdentifier, initialWallpaper?.id, allWallpapers, lang]);
+  }, [routeIdentifier, initialWallpaper?.id, allWallpapers, lang, retryCount]);
 
   const t = translations[lang];
 
   // Derived properties from resolved active wallpaper
   const wallpaper = activeWallpaper;
-  const rawTitle = wallpaper ? wallpaper.title[lang] || wallpaper.title.en : '';
+  const rawTitle = wallpaper ? wallpaper.title?.[lang] || wallpaper.title?.en || wallpaper.title?.ar || '4K Wallpaper' : '';
   const currentTitle = useMemo(() => cleanWallpaperTitle(rawTitle), [rawTitle]);
 
   // Clean resolution string isolated exclusively from title
@@ -702,6 +728,54 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
     );
   }
 
+  // Network / Supabase Error State
+  if (fetchError && !wallpaper) {
+    return (
+      <div className="min-h-screen bg-[#0D0E12] text-[#E2E8F0] flex flex-col selection:bg-cyan-500/25 selection:text-cyan-300">
+        <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-4">
+          <div className="flex items-center gap-2 text-neutral-400 text-xs">
+            <button
+              onClick={onBackToGallery}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#161720] hover:bg-[#202230] border border-[#272A3C] text-neutral-200 hover:text-white transition-all cursor-pointer font-medium group"
+            >
+              {lang === 'ar' ? (
+                <ArrowRight className="w-3.5 h-3.5 text-cyan-400 group-hover:-translate-x-0.5 transition-transform" />
+              ) : (
+                <ArrowLeft className="w-3.5 h-3.5 text-cyan-400 group-hover:-translate-x-0.5 transition-transform" />
+              )}
+              <span>{lang === 'ar' ? 'العودة إلى المعرض' : 'Back to Gallery'}</span>
+            </button>
+          </div>
+        </div>
+        <div className="max-w-md mx-auto my-24 p-8 text-center rounded-3xl bg-[#14151C] border border-red-500/30 shadow-2xl space-y-4">
+          <Info className="w-10 h-10 text-red-400 mx-auto" />
+          <h3 className="text-lg font-bold text-white">
+            {lang === 'ar' ? 'تعذر تحميل تفاصيل الخلفية' : 'Unable to Load Wallpaper'}
+          </h3>
+          <p className="text-xs text-neutral-400 break-words">
+            {fetchError}
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
+            <button
+              type="button"
+              onClick={() => setRetryCount((c) => c + 1)}
+              className="px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-xs shadow-md transition-colors cursor-pointer"
+            >
+              {lang === 'ar' ? 'إعادة المحاولة' : 'Retry'}
+            </button>
+            <button
+              type="button"
+              onClick={onBackToGallery}
+              className="px-5 py-2.5 rounded-xl bg-[#1C1E2B] hover:bg-[#25283A] border border-[#2E3348] text-neutral-200 font-bold text-xs transition-colors cursor-pointer"
+            >
+              {lang === 'ar' ? 'العودة إلى المعرض' : 'Return to Gallery'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Not Found State (Eliminating any hardcoded or fallback data fetching)
   if (notFound || !wallpaper) {
     return (
@@ -729,7 +803,7 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
           <p className="text-xs text-neutral-400 mb-6">
             {lang === 'ar'
               ? `لم يتم العثور على خلفية تطابق المعرف "${routeIdentifier || ''}".`
-              : `No record matching ID or slug "${routeIdentifier || ''}" was found in local storage.`}
+              : `No record matching ID or slug "${routeIdentifier || ''}" was found in storage or database.`}
           </p>
           <button
             type="button"
@@ -1123,7 +1197,7 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
                   title={isFavorited ? 'Favorited' : 'Favorite'}
                 >
                   <Heart className={`w-4 h-4 ${isFavorited ? 'fill-rose-500 text-rose-500' : ''}`} />
-                  <span className="text-xs font-mono font-bold">{wallpaper.favorites}</span>
+                  <span className="text-xs font-mono font-bold">{Number(wallpaper.favorites) || 0}</span>
                 </button>
 
                 <button
@@ -1345,7 +1419,7 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
               <span>{lang === 'ar' ? 'المشاهدات' : 'Total Views'}</span>
             </div>
             <div className="text-sm font-black text-white font-mono">
-              {(wallpaper.downloads * 3.4 + 120).toFixed(0)}
+              {((Number(wallpaper.downloads) || 0) * 3.4 + 120).toFixed(0)}
             </div>
             <div className="text-[10px] text-neutral-500 mt-0.5">Global Impressions</div>
           </div>
@@ -1355,7 +1429,7 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
               <Download className="w-3.5 h-3.5 text-cyan-400" />
               <span>{lang === 'ar' ? 'التحميلات' : 'Downloads'}</span>
             </div>
-            <div className="text-sm font-black text-white font-mono">{wallpaper.downloads}</div>
+            <div className="text-sm font-black text-white font-mono">{Number(wallpaper.downloads) || 0}</div>
             <div className="text-[10px] text-neutral-500 mt-0.5">Verified 4K Saves</div>
           </div>
 
@@ -1386,7 +1460,7 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
           </div>
 
           <div className="flex flex-wrap gap-2 sm:gap-2.5">
-            {wallpaper.tags.map((tag, idx) => (
+            {(Array.isArray(wallpaper.tags) ? wallpaper.tags : []).map((tag, idx) => (
               <button
                 key={idx}
                 type="button"
@@ -1432,8 +1506,9 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5">
             {relatedWallpapers.map((rel) => {
-              const relTitle = cleanWallpaperTitle(rel.title[lang] || rel.title.en);
-              const relRes = extractResolutionFromTitle(rel.title[lang] || rel.title.en) || (rel.resolution ? rel.resolution.replace(/\s*[xX]\s*/g, '×').trim() : (isCurrentMobile ? '2160×3840' : '3840×2160'));
+              const relRawTitle = rel.title?.[lang] || rel.title?.en || rel.title?.ar || '4K Wallpaper';
+              const relTitle = cleanWallpaperTitle(relRawTitle);
+              const relRes = extractResolutionFromTitle(relRawTitle) || (rel.resolution ? rel.resolution.replace(/\s*[xX]\s*/g, '×').trim() : (isCurrentMobile ? '2160×3840' : '3840×2160'));
               const relThumb = getOptimizedPreviewUrl(
                 rel.posterUrl || rel.thumbnailUrl || (rel.isLive ? undefined : rel.url),
                 640,
@@ -1497,6 +1572,7 @@ export const WallpaperDetailsPage = React.memo(
     prev.wallpaper?.posterUrl === next.wallpaper?.posterUrl &&
     prev.wallpaper?.downloads === next.wallpaper?.downloads &&
     prev.wallpaper?.favorites === next.wallpaper?.favorites &&
+    prev.allWallpapers === next.allWallpapers &&
     prev.isFavorited === next.isFavorited &&
     prev.lang === next.lang
 );

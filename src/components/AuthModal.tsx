@@ -61,7 +61,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           id: 'dl_demo_1',
           wallpaperId: 'wp-space-nebula',
           wallpaperTitle: 'Cosmic Stellar Nebula & Deep Galaxies',
-          wallpaperUrl: '/src/assets/images/wallpaper_space_nebula_1792241809155.jpg',
+          wallpaperUrl: '/wallpapers/wallpaper_space_nebula_1792241809155.jpg',
           resolution: '3840×2160',
           downloadedAt: new Date(Date.now() - 3600000 * 2).toISOString(),
         },

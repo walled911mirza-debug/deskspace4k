@@ -4,10 +4,14 @@ import App from './App.tsx';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import './index.css';
 
-createRoot(document.getElementById('root')!).render(
-  <ErrorBoundary>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
-  </ErrorBoundary>
-);
+const rootElement = document.getElementById('root');
+
+if (rootElement) {
+  createRoot(rootElement).render(
+    <ErrorBoundary>
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    </ErrorBoundary>
+  );
+}

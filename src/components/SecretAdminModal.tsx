@@ -44,6 +44,8 @@ import {
   Loader2,
   Send,
   Zap,
+  RefreshCw,
+  Cloud,
 } from 'lucide-react';
 import { Wallpaper, Category, Language, BlogPost } from '../types';
 import { translations } from '../translations';
@@ -80,6 +82,13 @@ import {
   cleanupCanvas,
 } from '../admin/utils/memoryHygiene';
 import { AdminDevCopilotWidget } from '../admin/components/AdminDevCopilotWidget';
+import { getSupabaseStatus } from '../lib/supabase';
+import {
+  generateWallpaperId,
+  createWallpaperWithSync,
+  updateWallpaperWithSync,
+  deleteWallpaperWithSync,
+} from '../lib/wallpapersService';
 
 interface SecretAdminModalProps {
   isOpen: boolean;
@@ -96,6 +105,8 @@ interface SecretAdminModalProps {
   onAddBlogPost: (newPost: BlogPost) => void;
   onUpdateBlogPost: (updatedPost: BlogPost) => void;
   onDeleteBlogPost: (id: string) => void | Promise<any>;
+  onRefreshFromCloud?: () => Promise<void> | void;
+  cloudSyncError?: string | null;
 }
 
 interface QueuedFile {
@@ -443,7 +454,11 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
   onAddBlogPost,
   onUpdateBlogPost,
   onDeleteBlogPost,
+  onRefreshFromCloud,
+  cloudSyncError,
 }) => {
+  const supabaseStatus = getSupabaseStatus();
+  const [isCloudSyncing, setIsCloudSyncing] = useState<boolean>(false);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [passwordInput, setPasswordInput] = useState<string>('');
   const [authError, setAuthError] = useState<string | null>(null);
@@ -517,6 +532,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
   const [globalResolution, setGlobalResolution] = useState<string>('3840×2160');
   const [globalTags, setGlobalTags] = useState<string>('4K Ultra HD, Desktop, High Res');
   const [globalIsLive, setGlobalIsLive] = useState<boolean>(true);
+  const [bulkPublishing, setBulkPublishing] = useState<boolean>(false);
   const [bulkNotice, setBulkNotice] = useState<string | null>(null);
   const bulkFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -739,18 +755,24 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
   };
 
   // Master Persistence Handler
-  const handleMasterSaveChanges = () => {
+  const handleMasterSaveChanges = async () => {
     try {
       safeSaveWallpapers(wallpapers);
       safeSaveBlogPosts(blogPosts);
-      saveAllCustomWallpapersToIndexedDB(wallpapers);
+      await saveAllCustomWallpapersToIndexedDB(wallpapers);
+      if (supabaseStatus.configured && onRefreshFromCloud) {
+        setIsCloudSyncing(true);
+        await onRefreshFromCloud();
+        setIsCloudSyncing(false);
+      }
       setMasterSaveToast(
         lang === 'ar'
-          ? 'تم حفظ وتثبيت جميع التعديلات والخلفيات والمقالات بنجاح في IndexedDB والتخزين الدائم!'
-          : 'All changes, wallpapers, and articles saved permanently to IndexedDB!'
+          ? 'تم حفظ وتثبيت جميع التعديلات والخلفيات والمقالات ومزامنتها بنجاح!'
+          : 'All changes, wallpapers, and articles saved and synced successfully!'
       );
     } catch (err) {
       console.warn('Storage sync notice during save', err);
+      setIsCloudSyncing(false);
       setMasterSaveToast(
         lang === 'ar'
           ? 'تم الحفظ بنجاح في الذاكرة الحالية ومزامنة البيانات!'
@@ -760,6 +782,28 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
     setTimeout(() => {
       setMasterSaveToast(null);
     }, 4000);
+  };
+
+  const handleSyncCloudNow = async () => {
+    if (!onRefreshFromCloud || isCloudSyncing) return;
+    setIsCloudSyncing(true);
+    try {
+      await onRefreshFromCloud();
+      setMasterSaveToast(
+        lang === 'ar'
+          ? 'تمت مزامنة البيانات مع Supabase بنجاح!'
+          : 'Synced latest wallpapers from Supabase!'
+      );
+    } catch {
+      setMasterSaveToast(
+        lang === 'ar'
+          ? 'تعذر الاتصال بقاعدة بيانات Supabase حالياً.'
+          : 'Could not reach Supabase right now.'
+      );
+    } finally {
+      setIsCloudSyncing(false);
+      setTimeout(() => setMasterSaveToast(null), 3500);
+    }
   };
 
   // ==========================================
@@ -900,7 +944,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
         let updatedCount = 0;
         // Strictly targeted update on matching wallpapers only
         for (const wp of wallpapers) {
-          const isTarget = targetCat === 'All' || wp.category.toLowerCase() === targetCat.toLowerCase();
+          const isTarget = targetCat === 'All' || (wp.category || '').toLowerCase() === targetCat.toLowerCase();
           if (isTarget) {
             const currentTags = Array.isArray(wp.tags) ? wp.tags : [];
             const merged = Array.from(new Set([...currentTags, ...tagsToAdd]));
@@ -909,9 +953,8 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                 ...wp,
                 tags: merged,
               };
-              onUpdateWallpaper(updatedWp);
-              // Save strictly into IndexedDB custom wallpapers store
-              await saveCustomWallpaperToIndexedDB(updatedWp);
+              const syncRes = await updateWallpaperWithSync(updatedWp);
+              onUpdateWallpaper(syncRes.wallpaper);
               updatedCount++;
             }
           }
@@ -935,7 +978,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
           type: 'success',
           message: lang === 'ar'
             ? `✅ تم تحديث وسوم ${updatedCount} خلفية بنجاح وحفظها في IndexedDB! لم يتم إعادة تعيين قاعدة البيانات أو حذف أي وسائط.`
-            : `✅ Successfully batch updated tags for ${updatedCount} wallpapers in IndexedDB! Zero storage resets performed.`,
+            : `✅ Successfully batch updated tags for ${updatedCount} wallpapers! Zero storage resets performed.`,
         });
         setCopilotResult(null);
         setCopilotPrompt('');
@@ -950,14 +993,14 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
         let updatedCount = 0;
 
         for (const wp of wallpapers) {
-          const isTarget = targetCat === 'All' || wp.category.toLowerCase() === targetCat.toLowerCase();
+          const isTarget = targetCat === 'All' || (wp.category || '').toLowerCase() === targetCat.toLowerCase();
           if (isTarget) {
             const currentTags = Array.isArray(wp.tags) ? wp.tags : [];
             const tagsToAdd = (metaData.tagsToAdd || []).map((t) => t.trim()).filter(Boolean);
             const mergedTags = Array.from(new Set([...currentTags, ...tagsToAdd]));
 
-            const currentDescEn = typeof wp.description === 'object' && wp.description ? wp.description.en : (typeof wp.description === 'string' ? wp.description : wp.title.en);
-            const currentDescAr = typeof wp.description === 'object' && wp.description ? wp.description.ar : (typeof wp.description === 'string' ? wp.description : wp.title.ar);
+            const currentDescEn = typeof wp.description === 'object' && wp.description ? (wp.description.en || '') : (typeof wp.description === 'string' ? wp.description : (wp.title?.en || ''));
+            const currentDescAr = typeof wp.description === 'object' && wp.description ? (wp.description.ar || '') : (typeof wp.description === 'string' ? wp.description : (wp.title?.ar || ''));
 
             const updatedWp: Wallpaper = {
               ...wp,
@@ -967,8 +1010,8 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                 ar: metaData.descAr || currentDescAr,
               },
             };
-            onUpdateWallpaper(updatedWp);
-            await saveCustomWallpaperToIndexedDB(updatedWp);
+            const syncRes = await updateWallpaperWithSync(updatedWp);
+            onUpdateWallpaper(syncRes.wallpaper);
             updatedCount++;
           }
         }
@@ -1203,36 +1246,13 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
     setManualNotice(null);
 
     try {
-      const wpId = `wp_custom_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const wpId = generateWallpaperId();
       const isMobileFormat = manualDeviceFormat === 'mobile';
       const isLive = Boolean(manualVideoFile || manualIsLive || isMobileFormat);
 
-      // 1. Store Raw 4K Image in IndexedDB
-      let finalImageUrl = `idb://media/${wpId}`;
-      let finalThumbnailUrl = manualImageThumbnail || manualVideoPoster || undefined;
-
-      if (manualImageFile) {
-        await storeBlobInIndexedDB(wpId, manualImageFile, manualImageFile.name);
-        if (manualImageThumbnail) {
-          await storeBlobInIndexedDB(`${wpId}_thumb`, undefined, 'thumb.jpg', manualImageThumbnail);
-        }
-      } else if (manualVideoPoster) {
-        // Video provided without still image: persist extracted poster as image
-        await storeBlobInIndexedDB(wpId, undefined, 'poster.jpg', manualVideoPoster);
-        finalImageUrl = `idb://media/${wpId}`;
-      }
-
-      // 2. Store Raw Live Video in IndexedDB (if attached)
-      let finalVideoUrl: string | undefined = undefined;
-      if (manualVideoFile) {
-        const videoStoreId = `${wpId}_video`;
-        await storeBlobInIndexedDB(videoStoreId, manualVideoFile, manualVideoFile.name);
-        finalVideoUrl = `idb://media/${videoStoreId}`;
-
-        if (manualVideoPoster) {
-          await storeBlobInIndexedDB(`${wpId}_poster`, undefined, 'poster.jpg', manualVideoPoster);
-        }
-      }
+      const finalImageUrl = `idb://media/${wpId}`;
+      const finalThumbnailUrl = manualImageThumbnail || manualVideoPoster || undefined;
+      const finalVideoUrl = manualVideoFile ? `idb://media/${wpId}_video` : undefined;
 
       // Parse tags
       let parsedTags = manualTags
@@ -1274,9 +1294,11 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
       const width = manualImageDimensions?.width || defaultWidth;
       const height = manualImageDimensions?.height || defaultHeight;
       const finalAspectRatio = isMobileFormat ? '9:16' : (manualImageDimensions ? `${width}:${height}` : '16:9');
+      const finalCategory = isMobileFormat && manualCategory === 'Journal' ? 'Mobile' : manualCategory;
 
-      const newWallpaper: Wallpaper = {
+      const baseWallpaper: Wallpaper = {
         id: wpId,
+        slug: slugify(titleEn) || wpId,
         title: {
           en: titleEn,
           ar: titleAr,
@@ -1285,7 +1307,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
           en: descEn,
           ar: descAr,
         },
-        category: isMobileFormat && manualCategory === 'Journal' ? 'Mobile' : manualCategory,
+        category: finalCategory,
         resolution: manualResolution || `${width}×${height}`,
         width,
         height,
@@ -1300,17 +1322,22 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
         downloads: 0,
         favorites: 0,
         fileSize: calculatedFileSize,
-        tags: parsedTags.length > 0 ? parsedTags : (isMobileFormat ? ['Mobile Live Wallpapers', '9:16 Vertical', manualCategory] : ['4K Ultra HD', manualCategory]),
+        tags: parsedTags.length > 0 ? parsedTags : (isMobileFormat ? ['Mobile Live Wallpapers', '9:16 Vertical', finalCategory] : ['4K Ultra HD', finalCategory]),
         colorPalette: ['#0A0B10', '#00F0FF', '#FF007F', '#A855F7', '#F8FAFC'],
         createdAt: new Date().toISOString(),
         isLive,
       };
 
-      // 3. Persist to IndexedDB
-      await saveCustomWallpaperToIndexedDB(newWallpaper);
+      // Persist to IndexedDB + upload to Supabase Storage "wallpapers" bucket & public.wallpapers table
+      const syncRes = await createWallpaperWithSync(baseWallpaper, {
+        imageFile: manualImageFile,
+        videoFile: manualVideoFile,
+        posterDataUrl: manualVideoPoster,
+        thumbnailDataUrl: manualImageThumbnail,
+      });
 
-      // 4. Update memory state in App
-      onAddWallpapers([newWallpaper]);
+      // Update memory state in App
+      onAddWallpapers([syncRes.wallpaper]);
 
       // Reset form
       handleClearManualImage();
@@ -1321,26 +1348,32 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
       setManualDescAr('');
       setManualTags(isMobileFormat ? 'Mobile Live Wallpapers, 9:16 Vertical, 60 FPS, OLED Black, Smartphone' : '4K Ultra HD, Desktop, OLED Black');
 
+      const syncDetail = syncRes.syncedToSupabase
+        ? (lang === 'ar' ? 'ومزامنتها مع Supabase!' : 'and synced to Supabase Storage & DB!')
+        : syncRes.error
+        ? (lang === 'ar' ? `(حُفظت محلياً؛ تنبيه السحابة: ${syncRes.error})` : `(Saved locally; cloud sync notice: ${syncRes.error})`)
+        : (lang === 'ar' ? 'في التخزين المحلي (IndexedDB)!' : 'to local persistent storage (IndexedDB)!');
+
       setManualNotice({
         type: 'success',
         message:
           lang === 'ar'
-            ? `تم رفع وحفظ الخلفية "${titleAr}" بنجاح في IndexedDB وقسم ${isMobileFormat ? 'خلفيات الهاتف الحية' : 'خلفيات سطح المكتب'}!`
-            : `Wallpaper "${titleEn}" successfully published to ${isMobileFormat ? 'Mobile Live Wallpapers' : 'Desktop 4K'} and stored permanently in IndexedDB!`,
+            ? `تم رفع وحفظ الخلفية "${titleAr}" بنجاح في قسم ${isMobileFormat ? 'خلفيات الهاتف الحية' : 'خلفيات سطح المكتب'} ${syncDetail}`
+            : `Wallpaper "${titleEn}" published to ${isMobileFormat ? 'Mobile Live Wallpapers' : 'Desktop 4K'} ${syncDetail}`,
       });
 
       setTimeout(() => {
         setManualNotice(null);
         setAdminTab('manage');
-      }, 2000);
+      }, 2200);
     } catch (err: any) {
       console.error('Error publishing manual wallpaper:', err);
       setManualNotice({
         type: 'error',
         message:
           lang === 'ar'
-            ? 'حدث خطأ أثناء حفظ الخلفية في قاعدة البيانات المحلية.'
-            : 'Error saving wallpaper to local persistent database.',
+            ? `حدث خطأ أثناء حفظ الخلفية: ${err?.message || 'خطأ غير متوقع'}`
+            : `Error saving wallpaper: ${err?.message || 'Unexpected error'}`,
       });
     } finally {
       setManualPublishing(false);
@@ -1371,12 +1404,12 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
 
     valid.forEach((file) => {
       const isVideo = file.type.startsWith('video/') || /\.(mp4|webm|mov|mkv)$/i.test(file.name);
-      const qId = `wp_custom_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+      const qId = generateWallpaperId();
       const previewUrl = registerBlobUrl(URL.createObjectURL(file));
       const name = cleanWallpaperTitle(file.name);
       const size = `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
 
-      // Immediately store raw file into IndexedDB
+      // Immediately cache raw file into IndexedDB
       storeBlobInIndexedDB(qId, file, file.name);
 
       const item: QueuedFile = {
@@ -1414,91 +1447,119 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
   };
 
   const handlePublishBulkBatch = async () => {
-    if (queuedFiles.length === 0) return;
+    if (queuedFiles.length === 0 || bulkPublishing) return;
+    setBulkPublishing(true);
 
-    const parsedTags = globalTags
-      .split(',')
-      .map((t) => t.trim())
-      .filter(Boolean);
+    try {
+      const parsedTags = globalTags
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean);
 
-    const bulkOpt = TARGET_PLACEMENT_OPTIONS.find((o) => o.key === bulkDefaultPlacement) || TARGET_PLACEMENT_OPTIONS[0];
-    const isMobileBatch = bulkOpt.deviceFormat === 'mobile';
-    const batchCategory = bulkOpt.category;
-    const batchResolution = bulkOpt.resolution || (isMobileBatch ? '2160×3840' : '3840×2160');
-    const batchWidth = isMobileBatch ? 2160 : 3840;
-    const batchHeight = isMobileBatch ? 3840 : 2160;
-    const batchAspectRatio = isMobileBatch ? '9:16' : '16:9';
+      const bulkOpt = TARGET_PLACEMENT_OPTIONS.find((o) => o.key === bulkDefaultPlacement) || TARGET_PLACEMENT_OPTIONS[0];
+      const isMobileBatch = bulkOpt.deviceFormat === 'mobile';
+      const batchCategory = bulkOpt.category;
+      const batchResolution = bulkOpt.resolution || (isMobileBatch ? '2160×3840' : '3840×2160');
+      const batchWidth = isMobileBatch ? 2160 : 3840;
+      const batchHeight = isMobileBatch ? 3840 : 2160;
+      const batchAspectRatio = isMobileBatch ? '9:16' : '16:9';
 
-    const newWallpapers: Wallpaper[] = queuedFiles.map((item, index) => {
-      const cleanName = cleanWallpaperTitle(item.name || item.file?.name || '');
-      const detectedRes = extractResolutionFromTitle(item.file?.name || item.name || '') || batchResolution;
-      const isLiveItem = Boolean(item.isVideo || isMobileBatch || globalIsLive);
-      const wpId = item.id;
+      const publishedWallpapers: Wallpaper[] = [];
+      let cloudSyncedCount = 0;
+      let firstSyncWarning: string | null = null;
 
-      if (item.file) {
-        storeBlobInIndexedDB(wpId, item.file, item.name);
+      for (let index = 0; index < queuedFiles.length; index++) {
+        const item = queuedFiles[index];
+        const cleanName = cleanWallpaperTitle(item.name || item.file?.name || '');
+        const detectedRes = extractResolutionFromTitle(item.file?.name || item.name || '') || batchResolution;
+        const isLiveItem = Boolean(item.isVideo || isMobileBatch || globalIsLive);
+        const wpId = item.id || generateWallpaperId();
+        const titleEn = cleanName || (isMobileBatch ? `Mobile Live ${batchCategory} ${index + 1}` : `4K Wallpaper ${index + 1}`);
+        const titleAr = cleanName || (isMobileBatch ? `خلفية هاتف حية ${batchCategory} ${index + 1}` : `خلفية شاشة 4K ${index + 1}`);
+
+        const finalMediaUrl = item.isVideo ? `idb://media/${wpId}_video` : `idb://media/${wpId}`;
+        const finalPoster =
+          item.posterUrl || item.thumbnailUrl || (item.isVideo ? getCategoryFallback(batchCategory) : `idb://media/${wpId}`);
+
+        const defaultTags = isMobileBatch
+          ? ['Mobile Live Wallpapers', '9:16 Vertical', batchCategory, '60 FPS']
+          : ['4K Ultra HD', 'Desktop', batchCategory];
+
+        const baseWallpaper: Wallpaper = {
+          id: wpId,
+          slug: slugify(titleEn) || wpId,
+          title: { en: titleEn, ar: titleAr },
+          description: {
+            en: isMobileBatch
+              ? 'Ultra-smooth 60 FPS vertical 9:16 Mobile Live Wallpaper uploaded via DeskSpace4K Admin Repository.'
+              : 'Curated 4K Ultra HD wallpaper uploaded via DeskSpace4K Admin Repository.',
+            ar: isMobileBatch
+              ? 'خلفية هاتف حية رأسية 9:16 بمعدل 60 إطاراً في الثانية تم رفعها عبر مستودع إدارة ديسك سبيس 4K.'
+              : 'خلفية فائقة الدقة 4K تم رفعها عبر مستودع إدارة ديسك سبيس 4K.',
+          },
+          category: batchCategory,
+          resolution: detectedRes,
+          width: batchWidth,
+          height: batchHeight,
+          url: finalMediaUrl,
+          videoUrl: isLiveItem ? finalMediaUrl : undefined,
+          posterUrl: finalPoster,
+          thumbnailUrl: item.thumbnailUrl || item.posterUrl || finalPoster,
+          formatType: item.isVideo ? 'video' : 'image',
+          aspectRatio: batchAspectRatio,
+          deviceFormat: isMobileBatch ? 'mobile' : 'desktop',
+          isMobile: isMobileBatch,
+          downloads: 0,
+          favorites: 0,
+          fileSize: item.size,
+          tags: parsedTags.length > 0 ? Array.from(new Set([...defaultTags, ...parsedTags])) : defaultTags,
+          colorPalette: ['#111827', '#00F0FF', '#10B981', '#EC4899', '#F9FAFB'],
+          createdAt: new Date().toISOString(),
+          isLive: isLiveItem,
+        };
+
+        const res = await createWallpaperWithSync(baseWallpaper, {
+          imageFile: !item.isVideo ? item.file : undefined,
+          videoFile: item.isVideo ? item.file : undefined,
+          posterDataUrl: item.posterUrl,
+          thumbnailDataUrl: item.thumbnailUrl,
+        });
+
+        publishedWallpapers.push(res.wallpaper);
+        if (res.syncedToSupabase) cloudSyncedCount++;
+        if (res.error && !firstSyncWarning) firstSyncWarning = res.error;
       }
 
-      const finalMediaUrl = `idb://media/${wpId}`;
-      const finalPoster =
-        item.posterUrl || item.thumbnailUrl || (item.isVideo ? getCategoryFallback(batchCategory) : finalMediaUrl);
+      onAddWallpapers(publishedWallpapers);
+      setQueuedFiles([]);
 
-      const defaultTags = isMobileBatch
-        ? ['Mobile Live Wallpapers', '9:16 Vertical', batchCategory, '60 FPS']
-        : ['4K Ultra HD', 'Desktop', batchCategory];
+      const cloudNote = supabaseStatus.configured
+        ? ` (${cloudSyncedCount}/${publishedWallpapers.length} synced to Supabase${firstSyncWarning ? ` — ${firstSyncWarning}` : ''})`
+        : '';
 
-      return {
-        id: wpId,
-        title: {
-          en: cleanName || (isMobileBatch ? `Mobile Live ${batchCategory} ${index + 1}` : `4K Wallpaper ${index + 1}`),
-          ar: cleanName || (isMobileBatch ? `خلفية هاتف حية ${batchCategory} ${index + 1}` : `خلفية شاشة 4K ${index + 1}`),
-        },
-        description: {
-          en: isMobileBatch
-            ? 'Ultra-smooth 60 FPS vertical 9:16 Mobile Live Wallpaper uploaded via DeskSpace4K Admin Repository.'
-            : 'Curated 4K Ultra HD wallpaper uploaded via DeskSpace4K Admin Repository.',
-          ar: isMobileBatch
-            ? 'خلفية هاتف حية رأسية 9:16 بمعدل 60 إطاراً في الثانية تم رفعها عبر مستودع إدارة ديسك سبيس 4K.'
-            : 'خلفية فائقة الدقة 4K تم رفعها عبر مستودع إدارة ديسك سبيس 4K.',
-        },
-        category: batchCategory,
-        resolution: detectedRes,
-        width: batchWidth,
-        height: batchHeight,
-        url: finalMediaUrl,
-        videoUrl: isLiveItem ? finalMediaUrl : undefined,
-        posterUrl: finalPoster,
-        thumbnailUrl: item.thumbnailUrl || item.posterUrl || finalMediaUrl,
-        formatType: item.isVideo ? 'video' : 'image',
-        aspectRatio: batchAspectRatio,
-        deviceFormat: isMobileBatch ? 'mobile' : 'desktop',
-        isMobile: isMobileBatch,
-        downloads: 0,
-        favorites: 0,
-        fileSize: item.size,
-        tags: parsedTags.length > 0 ? Array.from(new Set([...defaultTags, ...parsedTags])) : defaultTags,
-        colorPalette: ['#111827', '#00F0FF', '#10B981', '#EC4899', '#F9FAFB'],
-        createdAt: new Date().toISOString(),
-        isLive: isLiveItem,
-      };
-    });
+      setBulkNotice(
+        lang === 'ar'
+          ? `تم نشر ${publishedWallpapers.length} خلفيات بنجاح إلى قسم "${bulkOpt.labelAr}"${cloudNote}!`
+          : `Successfully published ${publishedWallpapers.length} wallpapers to "${bulkOpt.labelEn}"${cloudNote}!`
+      );
 
-    await saveAllCustomWallpapersToIndexedDB(newWallpapers);
-    onAddWallpapers(newWallpapers);
-    setQueuedFiles([]);
-    setBulkNotice(
-      lang === 'ar'
-        ? `تم نشر ${newWallpapers.length} خلفيات بنجاح إلى قسم "${bulkOpt.labelAr}"!`
-        : `Successfully published ${newWallpapers.length} wallpapers to "${bulkOpt.labelEn}"!`
-    );
-
-    setTimeout(() => {
-      setBulkNotice(null);
-      setAdminTab('manage');
-    }, 1500);
+      setTimeout(() => {
+        setBulkNotice(null);
+        setAdminTab('manage');
+      }, 2000);
+    } catch (err: any) {
+      console.error('Bulk publish error:', err);
+      setBulkNotice(
+        lang === 'ar'
+          ? `تعذر نشر الدفعة بالكامل: ${err?.message || 'خطأ غير متوقع'}`
+          : `Bulk publish failed: ${err?.message || 'Unexpected error'}`
+      );
+    } finally {
+      setBulkPublishing(false);
+    }
   };
 
-  // Inline placement and category re-assignment with real-time IndexedDB update
+  // Inline placement and category re-assignment with real-time Supabase & IndexedDB update
   const handleInlinePlacementChange = async (wp: Wallpaper, newPlacementKey: string) => {
     const targetOpt = TARGET_PLACEMENT_OPTIONS.find((o) => o.key === newPlacementKey);
     if (!targetOpt) return;
@@ -1506,7 +1567,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
     const isMobile = targetOpt.deviceFormat === 'mobile';
     const isLive = isMobile ? true : wp.isLive;
 
-    let updatedTags = [...wp.tags];
+    let updatedTags = [...(Array.isArray(wp.tags) ? wp.tags : [])];
     if (isMobile) {
       if (!updatedTags.includes('Mobile Live Wallpapers')) updatedTags.unshift('Mobile Live Wallpapers');
       if (!updatedTags.includes('9:16 Vertical')) updatedTags.push('9:16 Vertical');
@@ -1531,12 +1592,13 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
     };
 
     try {
-      await saveCustomWallpaperToIndexedDB(updated);
-      onUpdateWallpaper(updated);
+      const res = await updateWallpaperWithSync(updated);
+      onUpdateWallpaper(res.wallpaper);
+      setManageNoticeType(res.error ? 'info' : 'success');
       setManageNotice(
         lang === 'ar'
-          ? `تم تحديث التصنيف والوجهة إلى: "${targetOpt.labelAr}" وحفظها في قاعدة البيانات فوراً!`
-          : `Placement switched to: "${targetOpt.labelEn}" and saved to IndexedDB!`
+          ? `تم تحديث التصنيف والوجهة إلى: "${targetOpt.labelAr}" وحفظها فوراً!`
+          : `Placement switched to: "${targetOpt.labelEn}"${res.syncedToSupabase ? ' and synced to Supabase!' : ' and saved locally!'}`
       );
       setTimeout(() => setManageNotice(null), 3000);
     } catch (err) {
@@ -1646,11 +1708,11 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
   // ==========================================
   const startEditWallpaper = (wp: Wallpaper) => {
     setEditingWallpaper(wp);
-    setEditTitleEn(wp.title.en);
-    setEditTitleAr(wp.title.ar);
+    setEditTitleEn(wp.title?.en || '');
+    setEditTitleAr(wp.title?.ar || '');
     setEditCategory(wp.category);
-    setEditResolution(wp.resolution);
-    setEditTags(wp.tags.join(', '));
+    setEditResolution(wp.resolution || '3840×2160');
+    setEditTags((Array.isArray(wp.tags) ? wp.tags : []).join(', '));
     setEditDescEn(typeof wp.description === 'string' ? wp.description : wp.description?.en || '');
     setEditDescAr(typeof wp.description === 'string' ? wp.description : wp.description?.ar || '');
   };
@@ -1667,8 +1729,8 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
     const updated: Wallpaper = {
       ...editingWallpaper,
       title: {
-        en: editTitleEn.trim() || editingWallpaper.title.en,
-        ar: editTitleAr.trim() || editingWallpaper.title.ar,
+        en: editTitleEn.trim() || editingWallpaper.title?.en || 'Untitled 4K Wallpaper',
+        ar: editTitleAr.trim() || editingWallpaper.title?.ar || editTitleEn.trim() || 'خلفية 4K',
       },
       description: {
         en: editDescEn.trim() || (typeof editingWallpaper.description === 'string' ? editingWallpaper.description : editingWallpaper.description?.en || ''),
@@ -1676,26 +1738,35 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
       },
       category: editCategory,
       resolution: editResolution,
-      tags: parsedTags.length > 0 ? parsedTags : editingWallpaper.tags,
+      tags: parsedTags.length > 0 ? parsedTags : (Array.isArray(editingWallpaper.tags) ? editingWallpaper.tags : []),
     };
 
-    await saveCustomWallpaperToIndexedDB(updated);
-    onUpdateWallpaper(updated);
+    const res = await updateWallpaperWithSync(updated);
+    onUpdateWallpaper(res.wallpaper);
     setEditingWallpaper(null);
+    setManageNoticeType(res.error ? 'info' : 'success');
     setManageNotice(
-      lang === 'ar' ? 'تم تحديث بيانات الخلفية بنجاح!' : 'Wallpaper details updated successfully!'
+      res.error
+        ? (lang === 'ar'
+            ? `تم التحديث محلياً (تنبيه السحابة: ${res.error})`
+            : `Updated locally (cloud notice: ${res.error})`)
+        : (lang === 'ar'
+            ? 'تم تحديث بيانات الخلفية ومزامنتها بنجاح!'
+            : `Wallpaper details updated${res.syncedToSupabase ? ' & synced to Supabase!' : ' successfully!'}`)
     );
-    setTimeout(() => setManageNotice(null), 3000);
+    setTimeout(() => setManageNotice(null), 3500);
   };
 
   const handleDeleteWallpaperConfirm = async (id: string) => {
     if (!id) return;
     setIsDeletingWallpaper(true);
     try {
-      // 1. Explicit atomic IndexedDB deletion across wallpapers, blobs, and deleted stores
-      const result = await permanentlyDeleteWallpaperFromIndexedDB(id);
+      const targetWp = wallpapers.find((w) => w.id === id);
+
+      // 1. Delete from Supabase Storage bucket + public.wallpapers + IndexedDB
+      const result = await deleteWallpaperWithSync(targetWp || id);
       if (!result.success) {
-        throw new Error(result.error || 'IndexedDB transaction failed to delete record');
+        throw new Error(result.error || 'Failed to delete wallpaper record');
       }
 
       // Also clean up any lingering media blobs by ID
@@ -1709,8 +1780,8 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
       setManageNoticeType('success');
       setManageNotice(
         lang === 'ar'
-          ? 'تم حذف الخلفية وملفاتها نهائياً من قاعدة البيانات (IndexedDB) ولن يتم استعادتها عند التحديث!'
-          : 'Wallpaper and all media records permanently purged from IndexedDB. Persistence guaranteed across reloads!'
+          ? 'تم حذف الخلفية وملفاتها نهائياً من السحابة وقاعدة البيانات المحلية!'
+          : `Wallpaper and media purged${result.syncedToSupabase ? ' from Supabase Storage/DB & IndexedDB!' : ' from IndexedDB!'}`
       );
     } catch (err: any) {
       console.error('Failed to permanently delete wallpaper:', err);
@@ -1729,11 +1800,12 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
   // Filtered wallpapers for Manage Tab
   const filteredWallpapers = wallpapers.filter((wp) => {
     const q = searchTerm.toLowerCase().trim();
+    const safeTags = Array.isArray(wp.tags) ? wp.tags : [];
     const matchesQuery =
       !q ||
-      wp.title.en.toLowerCase().includes(q) ||
-      wp.title.ar.toLowerCase().includes(q) ||
-      wp.tags.some((t) => t.toLowerCase().includes(q));
+      String(wp.title?.en || '').toLowerCase().includes(q) ||
+      String(wp.title?.ar || '').toLowerCase().includes(q) ||
+      safeTags.some((t) => String(t || '').toLowerCase().includes(q));
     const matchesCat = filterCategory === 'All' || wp.category === filterCategory;
     return matchesQuery && matchesCat;
   });
@@ -1922,24 +1994,30 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Top Header Bar */}
-        <div className="px-6 py-4 bg-[#0B0C10] border-b border-[#202230] flex items-center justify-between">
+        <div className="px-6 py-4 bg-[#0B0C10] border-b border-[#202230] flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded-2xl bg-gradient-to-tr from-amber-500/20 to-red-500/20 border border-amber-500/30 text-amber-400">
               <Shield className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-base sm:text-lg font-black text-white tracking-tight">
                   DeskSpace4K Admin Center
                 </h2>
-                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-500/15 text-cyan-400 border border-cyan-500/30">
-                  MANUAL REPOSITORY
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${
+                    supabaseStatus.configured
+                      ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                      : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                  }`}
+                >
+                  {supabaseStatus.configured ? 'SUPABASE + IDB' : 'LOCAL IDB MODE'}
                 </span>
               </div>
               <p className="text-xs text-neutral-400">
                 {lang === 'ar'
-                  ? 'لوحة الإدارة والتحكم في رفع الخلفيات بدقة 4K والمقالات وحفظها في IndexedDB'
-                  : 'Manual 4K Wallpaper Upload & Admin Management System (IndexedDB Storage)'}
+                  ? 'لوحة الإدارة والتحكم في رفع الخلفيات بدقة 4K ومزامنتها مع Supabase و IndexedDB'
+                  : '4K Wallpaper Upload & Cloud/IndexedDB Sync Management System'}
               </p>
             </div>
           </div>
@@ -1947,6 +2025,19 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
           <div className="flex items-center gap-2">
             {isAuthenticated && (
               <>
+                {supabaseStatus.configured && onRefreshFromCloud && (
+                  <button
+                    type="button"
+                    onClick={handleSyncCloudNow}
+                    disabled={isCloudSyncing}
+                    className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-xs font-bold transition-all cursor-pointer disabled:opacity-50"
+                    title="Sync Wallpapers from Supabase"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isCloudSyncing ? 'animate-spin' : ''}`} />
+                    <span>{lang === 'ar' ? 'مزامنة السحابة' : 'Sync Cloud'}</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={handleMasterSaveChanges}
@@ -1954,7 +2045,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                   title="Force Persist All Changes to Storage"
                 >
                   <Database className="w-3.5 h-3.5" />
-                  <span>{lang === 'ar' ? 'مزامنة وحفظ دائم' : 'Save to IndexedDB'}</span>
+                  <span>{lang === 'ar' ? 'مزامنة وحفظ دائم' : 'Save to Storage'}</span>
                 </button>
 
                 <button
@@ -3174,17 +3265,17 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
 
                           {/* Titles */}
                           <div>
-                            <div className="font-bold text-xs text-white truncate" title={wp.title.en}>
-                              {wp.title[lang] || wp.title.en}
+                            <div className="font-bold text-xs text-white truncate" title={wp.title?.en || wp.title?.ar || '4K Wallpaper'}>
+                              {wp.title?.[lang] || wp.title?.en || wp.title?.ar || '4K Wallpaper'}
                             </div>
                             <div className="text-[11px] text-neutral-400 truncate mt-0.5">
-                              {wp.title.en} · {wp.title.ar}
+                              {wp.title?.en || ''} · {wp.title?.ar || ''}
                             </div>
                           </div>
 
                           {/* Tags */}
                           <div className="flex flex-wrap gap-1">
-                            {wp.tags.slice(0, 3).map((tag) => (
+                            {(Array.isArray(wp.tags) ? wp.tags : []).slice(0, 3).map((tag) => (
                               <span
                                 key={tag}
                                 className="text-[9px] px-1.5 py-0.5 rounded bg-[#1B1D28] text-neutral-400"
@@ -3199,7 +3290,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                         <div className="pt-2.5 pb-1 border-t border-[#1C1E2B] space-y-1.5">
                           <div className="flex items-center justify-between text-[10px]">
                             <span className="font-bold text-neutral-400 flex items-center gap-1">
-                              {wp.deviceFormat === 'mobile' || wp.aspectRatio === '9:16' || wp.category === 'Mobile' || wp.tags.includes('Mobile Live Wallpapers') ? (
+                              {wp.deviceFormat === 'mobile' || wp.aspectRatio === '9:16' || wp.category === 'Mobile' || (Array.isArray(wp.tags) && wp.tags.includes('Mobile Live Wallpapers')) ? (
                                 <Smartphone className="w-3 h-3 text-fuchsia-400" />
                               ) : (
                                 <Monitor className="w-3 h-3 text-cyan-400" />
@@ -3208,12 +3299,12 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                             </span>
                             <span
                               className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold ${
-                                wp.deviceFormat === 'mobile' || wp.aspectRatio === '9:16' || wp.category === 'Mobile' || wp.tags.includes('Mobile Live Wallpapers')
+                                wp.deviceFormat === 'mobile' || wp.aspectRatio === '9:16' || wp.category === 'Mobile' || (Array.isArray(wp.tags) && wp.tags.includes('Mobile Live Wallpapers'))
                                   ? 'text-fuchsia-300 bg-fuchsia-500/15 border border-fuchsia-500/30'
                                   : 'text-cyan-300 bg-cyan-500/15 border border-cyan-500/30'
                               }`}
                             >
-                              {wp.deviceFormat === 'mobile' || wp.aspectRatio === '9:16' || wp.category === 'Mobile' || wp.tags.includes('Mobile Live Wallpapers')
+                              {wp.deviceFormat === 'mobile' || wp.aspectRatio === '9:16' || wp.category === 'Mobile' || (Array.isArray(wp.tags) && wp.tags.includes('Mobile Live Wallpapers'))
                                 ? '9:16 Mobile Live'
                                 : '16:9 Desktop 4K'}
                             </span>
@@ -3221,7 +3312,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
 
                           <select
                             value={
-                              wp.deviceFormat === 'mobile' || wp.aspectRatio === '9:16' || wp.category === 'Mobile' || wp.tags.includes('Mobile Live Wallpapers')
+                              wp.deviceFormat === 'mobile' || wp.aspectRatio === '9:16' || wp.category === 'Mobile' || (Array.isArray(wp.tags) && wp.tags.includes('Mobile Live Wallpapers'))
                                 ? `mobile:${wp.category === 'Mobile' ? 'Mobile' : wp.category}`
                                 : `desktop:${wp.category}`
                             }
@@ -3617,14 +3708,28 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                           <button
                             type="button"
                             onClick={handlePublishBulkBatch}
-                            className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-cyan-500 via-blue-600 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-black font-black text-xs cursor-pointer shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2"
+                            disabled={bulkPublishing}
+                            className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-cyan-500 via-blue-600 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-black font-black text-xs cursor-pointer shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 disabled:opacity-60"
                           >
-                            <Check className="w-4 h-4 stroke-[3]" />
-                            <span>
-                              {lang === 'ar'
-                                ? `نشر ${queuedFiles.length} خلفيات دفعة واحدة إلى قسم: ${bulkOpt.labelAr}`
-                                : `Publish All ${queuedFiles.length} Wallpapers to "${bulkOpt.labelEn}"`}
-                            </span>
+                            {bulkPublishing ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                <span>
+                                  {lang === 'ar'
+                                    ? `جاري رفع ونشر ${queuedFiles.length} خلفيات...`
+                                    : `Publishing & Syncing ${queuedFiles.length} Wallpapers...`}
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <Check className="w-4 h-4 stroke-[3]" />
+                                <span>
+                                  {lang === 'ar'
+                                    ? `نشر ${queuedFiles.length} خلفيات دفعة واحدة إلى قسم: ${bulkOpt.labelAr}`
+                                    : `Publish All ${queuedFiles.length} Wallpapers to "${bulkOpt.labelEn}"`}
+                                </span>
+                              </>
+                            )}
                           </button>
                         );
                       })()}
@@ -4487,6 +4592,31 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                       <div>ObjectStores: [media_blobs, custom_wallpapers, custom_blog_posts]</div>
                       <div>Persistence Status: Permanent Local IndexedDB (Zero Volatile URL Decay)</div>
                     </div>
+
+                    <div className="p-4 rounded-xl bg-[#0B0C10] border border-[#1E202B] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex items-start gap-2.5 text-xs">
+                        <Cloud className={`w-4 h-4 shrink-0 mt-0.5 ${supabaseStatus.configured ? 'text-emerald-400' : 'text-amber-400'}`} />
+                        <div className="space-y-0.5">
+                          <div className="font-bold text-white">
+                            {supabaseStatus.configured ? 'Supabase Storage & Database Connected' : 'Supabase Running in Safe Local Fallback'}
+                          </div>
+                          <div className="text-[11px] text-neutral-400">
+                            {cloudSyncError || supabaseStatus.error || 'Table: public.wallpapers · Bucket: wallpapers'}
+                          </div>
+                        </div>
+                      </div>
+                      {supabaseStatus.configured && onRefreshFromCloud && (
+                        <button
+                          type="button"
+                          onClick={handleSyncCloudNow}
+                          disabled={isCloudSyncing}
+                          className="px-3.5 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${isCloudSyncing ? 'animate-spin' : ''}`} />
+                          <span>{lang === 'ar' ? 'تحديث من السحابة' : 'Refresh Cloud'}</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
@@ -4781,8 +4911,8 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                             </div>
                             <div className="text-[11px] text-neutral-400 pt-1">
                               {lang === 'ar'
-                                ? `عدد الخلفيات المستهدفة في المعرض: ${wallpapers.filter(w => copilotResult?.tagUpdateData?.targetCategory === 'All' || w.category.toLowerCase() === copilotResult?.tagUpdateData?.targetCategory?.toLowerCase()).length} خلفية.`
-                                : `Targeted wallpapers in gallery: ${wallpapers.filter(w => copilotResult?.tagUpdateData?.targetCategory === 'All' || w.category.toLowerCase() === copilotResult?.tagUpdateData?.targetCategory?.toLowerCase()).length} items.`}
+                                ? `عدد الخلفيات المستهدفة في المعرض: ${wallpapers.filter(w => copilotResult?.tagUpdateData?.targetCategory === 'All' || (w.category || '').toLowerCase() === copilotResult?.tagUpdateData?.targetCategory?.toLowerCase()).length} خلفية.`
+                                : `Targeted wallpapers in gallery: ${wallpapers.filter(w => copilotResult?.tagUpdateData?.targetCategory === 'All' || (w.category || '').toLowerCase() === copilotResult?.tagUpdateData?.targetCategory?.toLowerCase()).length} items.`}
                             </div>
                           </div>
                         </div>
@@ -4991,11 +5121,12 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                 {wallpapers
                   .filter((w) => {
                     const q = wallpaperPickerSearch.toLowerCase().trim();
+                    const safeTags = Array.isArray(w.tags) ? w.tags : [];
                     const matchesSearch =
                       !q ||
-                      w.title.en.toLowerCase().includes(q) ||
-                      w.title.ar.toLowerCase().includes(q) ||
-                      w.tags.some((t) => t.toLowerCase().includes(q));
+                      String(w.title?.en || '').toLowerCase().includes(q) ||
+                      String(w.title?.ar || '').toLowerCase().includes(q) ||
+                      safeTags.some((t) => String(t || '').toLowerCase().includes(q));
                     const matchesCat = wallpaperPickerCategory === 'All' || w.category === wallpaperPickerCategory;
                     return matchesSearch && matchesCat;
                   })
@@ -5009,8 +5140,8 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                         setShowWallpaperPickerModal(false);
                         setAiBlogImageNotice(
                           lang === 'ar'
-                            ? `تم ربط خلفية "${wp.title.ar}" كصورة غلاف للمقال!`
-                            : `Attached "${wp.title.en}" as article featured cover!`
+                            ? `تم ربط خلفية "${wp.title?.ar || wp.title?.en || '4K'}" كصورة غلاف للمقال!`
+                            : `Attached "${wp.title?.en || wp.title?.ar || '4K'}" as article featured cover!`
                         );
                         setTimeout(() => setAiBlogImageNotice(null), 3000);
                       }}
@@ -5018,7 +5149,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                       <div className="relative aspect-video rounded-xl overflow-hidden bg-black/60">
                         <img
                           src={wp.thumbnailUrl || wp.posterUrl || wp.url || getCategoryFallback(wp.category)}
-                          alt={wp.title.en}
+                          alt={wp.title?.en || '4K Wallpaper'}
                           onError={(e) => {
                             (e.target as HTMLImageElement).src = getCategoryFallback(wp.category);
                           }}
@@ -5035,7 +5166,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                       </div>
 
                       <div className="px-1">
-                        <div className="text-[11px] font-bold text-white truncate">{wp.title[lang] || wp.title.en}</div>
+                        <div className="text-[11px] font-bold text-white truncate">{wp.title?.[lang] || wp.title?.en || wp.title?.ar || '4K Wallpaper'}</div>
                         <div className="text-[9px] text-neutral-400 flex items-center justify-between mt-0.5">
                           <span>{wp.category}</span>
                           <span className="font-mono text-cyan-400">{wp.aspectRatio || '16:9'}</span>
@@ -5046,7 +5177,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleCopyMarkdownEmbed(wp.url, wp.title.en);
+                          handleCopyMarkdownEmbed(wp.url, wp.title?.en || '4K Wallpaper');
                         }}
                         className="w-full py-1 rounded-lg bg-[#1C1F2E] hover:bg-[#252A3E] text-neutral-300 hover:text-white text-[10px] font-bold flex items-center justify-center gap-1 transition-colors cursor-pointer"
                         title="Copy Markdown embed tag: ![Title](url)"

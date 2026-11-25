@@ -44,7 +44,7 @@ const WallpaperCardComponent: React.FC<WallpaperCardProps> = ({
   const [fallbackLevel, setFallbackLevel] = useState<number>(0);
   const [hasPermanentError, setHasPermanentError] = useState(false);
 
-  const rawTitle = wallpaper.title[lang] || wallpaper.title.en;
+  const rawTitle = wallpaper.title?.[lang] || wallpaper.title?.en || wallpaper.title?.ar || '4K Wallpaper';
   const currentTitle = cleanWallpaperTitle(rawTitle);
   const t = translations[lang];
 
@@ -62,11 +62,13 @@ const WallpaperCardComponent: React.FC<WallpaperCardProps> = ({
         isVideoUrl(wallpaper.videoUrl))
   );
 
+  const safeTags = Array.isArray(wallpaper.tags) ? wallpaper.tags : [];
   const isMobileCard = Boolean(
     wallpaper.deviceFormat === 'mobile' ||
       wallpaper.aspectRatio === '9:16' ||
       wallpaper.isMobile === true ||
-      wallpaper.tags?.includes('Mobile Live Wallpapers')
+      wallpaper.category === 'Mobile' ||
+      safeTags.includes('Mobile Live Wallpapers')
   );
 
   const isVideo = isLiveMedia && !videoError;
@@ -474,7 +476,7 @@ const WallpaperCardComponent: React.FC<WallpaperCardProps> = ({
             <span className="truncate max-w-[80px] sm:max-w-none">{t.categories[wallpaper.category] || wallpaper.category}</span>
             <span aria-hidden="true" className="text-neutral-600 hidden sm:inline">·</span>
             <span className="font-mono tabular-nums hidden sm:inline">
-              {wallpaper.downloads.toLocaleString()} {t.downloadsCount}
+              {(Number(wallpaper.downloads) || 0).toLocaleString()} {t.downloadsCount}
             </span>
           </div>
         </div>
