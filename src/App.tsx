@@ -56,8 +56,10 @@ import {
 } from './utils/navigationState';
 import { DEFAULT_FALLBACK_IMAGE } from './utils/mediaUtils';
 import { SEOManager } from './utils/seo';
+import { isSupabaseConfigured } from './lib/supabase';
 import {
-  fetchWallpapersFromSupabase,
+  fetchWallpapersBatchFromSupabase,
+  WALLPAPERS_BATCH_SIZE,
   syncWallpaperStats,
 } from './lib/wallpapersService';
 
@@ -102,37 +104,14 @@ export default function App() {
   const isBlogHydratedRef = React.useRef(false);
 
   const [wallpapersLoading, setWallpapersLoading] = useState<boolean>(true);
+  const [loadingMoreDesktop, setLoadingMoreDesktop] = useState<boolean>(false);
   const [wallpapersError, setWallpapersError] = useState<string | null>(null);
-
-  const loadWallpapersFromCloud = useCallback(async () => {
-    setWallpapersLoading(true);
-    setWallpapersError(null);
-    try {
-      const res = await fetchWallpapersFromSupabase();
-      if (!res.configured) {
-        setWallpapers([]);
-        setWallpapersError(null);
-        return;
-      }
-
-      if (res.error) {
-        setWallpapersError(res.error);
-        return;
-      }
-
-      setWallpapers(res.wallpapers);
-    } catch (err: any) {
-      setWallpapersError(err?.message || 'Unable to reach wallpaper database.');
-    } finally {
-      setWallpapersLoading(false);
-    }
-  }, []);
+  const [desktopTotalCount, setDesktopTotalCount] = useState<number>(0);
+  const [desktopHasMore, setDesktopHasMore] = useState<boolean>(false);
+  const [desktopLoadedThroughPage, setDesktopLoadedThroughPage] = useState<number>(1);
 
   useEffect(() => {
     let isMounted = true;
-
-    // Hydrate strictly from Supabase public.wallpapers
-    loadWallpapersFromCloud();
 
     // Hydrate Custom Blog Posts (Data Safety Protocol)
     loadCustomBlogPostsFromIndexedDB()
@@ -176,7 +155,7 @@ export default function App() {
     return () => {
       isMounted = false;
     };
-  }, [loadWallpapersFromCloud]);
+  }, []);
 
   // Helper to strictly identify Mobile 9:16 Wallpapers
   const isMobileWallpaper = (w: Wallpaper): boolean => {
@@ -223,6 +202,13 @@ export default function App() {
     }
     return '';
   });
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState<string>(searchQuery);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
   const [sortBy, setSortBy] = useState<'latest' | 'popular' | 'favorites'>(() => {
     if (typeof window !== 'undefined') {
       const saved = getGalleryNavigationState();
@@ -538,6 +524,8 @@ export default function App() {
       (w.title?.ar && w.title.ar.trim() !== '')
     );
     const hasMedia = Boolean(
+      (w.previewUrl && w.previewUrl.trim() !== '' && w.previewUrl !== 'undefined' && w.previewUrl !== 'null') ||
+      (w.fullUrl && w.fullUrl.trim() !== '' && w.fullUrl !== 'undefined' && w.fullUrl !== 'null') ||
       (w.url && w.url.trim() !== '' && w.url !== 'undefined' && w.url !== 'null') ||
       (w.thumbnailUrl && w.thumbnailUrl.trim() !== '' && w.thumbnailUrl !== 'undefined') ||
       (w.posterUrl && w.posterUrl.trim() !== '' && w.posterUrl !== 'undefined') ||
@@ -555,7 +543,7 @@ export default function App() {
     return wallpapers.filter((w) => isValidPublicWallpaper(w) && isMobileWallpaper(w));
   }, [wallpapers]);
 
-  // Filter & Sort Desktop Wallpapers (Main Public Feed - ALL Mobile 9:16 Wallpapers 100% Excluded)
+  // Filter & Sort Desktop Wallpapers (Server-fetched batches + instant local fallback filtering)
   const filteredDesktopWallpapers = useMemo(() => {
     let result = [...desktopWallpapers];
 
@@ -576,13 +564,15 @@ export default function App() {
       });
     }
 
-    result.sort((a, b) => {
-      if (sortBy === 'popular') return (Number(b.downloads) || 0) - (Number(a.downloads) || 0);
-      if (sortBy === 'favorites') return (Number(b.favorites) || 0) - (Number(a.favorites) || 0);
-      const timeB = Date.parse(b.createdAt || '') || 0;
-      const timeA = Date.parse(a.createdAt || '') || 0;
-      return timeB - timeA;
-    });
+    if (!isSupabaseConfigured) {
+      result.sort((a, b) => {
+        if (sortBy === 'popular') return (Number(b.downloads) || 0) - (Number(a.downloads) || 0);
+        if (sortBy === 'favorites') return (Number(b.favorites) || 0) - (Number(a.favorites) || 0);
+        const timeB = Date.parse(b.createdAt || '') || 0;
+        const timeA = Date.parse(a.createdAt || '') || 0;
+        return timeB - timeA;
+      });
+    }
 
     return result;
   }, [desktopWallpapers, selectedCategory, searchQuery, sortBy]);
@@ -721,14 +711,92 @@ export default function App() {
     }
   }, [navigate, activeWallpaper]);
 
-  // Compute total pages and boundary guard
-  const totalPages = Math.max(1, Math.ceil(filteredDesktopWallpapers.length / itemsPerPage));
+  const activeDesktopCategory = useMemo(
+    () => (selectedCategory === 'Blog' || selectedCategory === 'MobileLive' ? 'All' : selectedCategory),
+    [selectedCategory]
+  );
+
+  const loadDesktopBatch = useCallback(
+    async (pageNum: number, append: boolean = false) => {
+      if (append) {
+        setLoadingMoreDesktop(true);
+      } else {
+        setWallpapersLoading(true);
+      }
+      setWallpapersError(null);
+
+      try {
+        const res = await fetchWallpapersBatchFromSupabase({
+          page: pageNum,
+          limit: itemsPerPage || WALLPAPERS_BATCH_SIZE,
+          deviceFormat: 'desktop',
+          category: activeDesktopCategory,
+          sortBy,
+          searchQuery: debouncedSearchQuery,
+        });
+
+        if (!res.configured) {
+          setWallpapers([]);
+          setDesktopTotalCount(0);
+          setDesktopHasMore(false);
+          setDesktopLoadedThroughPage(1);
+          setWallpapersError(null);
+          return;
+        }
+
+        if (res.error) {
+          setWallpapersError(res.error);
+          return;
+        }
+
+        setDesktopTotalCount(res.totalCount);
+        setDesktopHasMore(res.hasMore);
+        setDesktopLoadedThroughPage(pageNum);
+
+        if (append) {
+          setWallpapers((prev) => {
+            const existingIds = new Set(prev.map((item) => item.id));
+            const uniqueNew = res.wallpapers.filter((item) => !existingIds.has(item.id));
+            return [...prev, ...uniqueNew];
+          });
+        } else {
+          setWallpapers(res.wallpapers);
+        }
+      } catch (err: any) {
+        setWallpapersError(err?.message || 'Unable to reach wallpaper database.');
+      } finally {
+        setWallpapersLoading(false);
+        setLoadingMoreDesktop(false);
+      }
+    },
+    [itemsPerPage, activeDesktopCategory, sortBy, debouncedSearchQuery]
+  );
+
+  const loadWallpapersFromCloud = useCallback(async () => {
+    await loadDesktopBatch(currentPage, false);
+  }, [loadDesktopBatch, currentPage]);
+
+  // Fetch active 24-item batch whenever page, limit, category, sort, or debounced search changes
+  useEffect(() => {
+    loadDesktopBatch(currentPage, false);
+  }, [loadDesktopBatch, currentPage]);
+
+  const handleLoadMoreDesktop = useCallback(() => {
+    if (loadingMoreDesktop || wallpapersLoading || !desktopHasMore) return;
+    loadDesktopBatch(desktopLoadedThroughPage + 1, true);
+  }, [loadingMoreDesktop, wallpapersLoading, desktopHasMore, loadDesktopBatch, desktopLoadedThroughPage]);
+
+  // Compute total pages using Supabase exact count (supports up to 4,000+ records)
+  const effectiveDesktopTotal = isSupabaseConfigured
+    ? Math.max(desktopTotalCount, filteredDesktopWallpapers.length)
+    : filteredDesktopWallpapers.length;
+  const totalPages = Math.max(1, Math.ceil(effectiveDesktopTotal / itemsPerPage));
 
   useEffect(() => {
-    if (currentPage > totalPages && totalPages > 0) {
+    if (!wallpapersLoading && currentPage > totalPages && totalPages > 0) {
       setCurrentPage(totalPages);
     }
-  }, [currentPage, totalPages]);
+  }, [wallpapersLoading, currentPage, totalPages]);
 
   // Page change handler with URL sync and browser history
   const handlePageChange = useCallback(
@@ -740,7 +808,7 @@ export default function App() {
       } else {
         params.delete('page');
       }
-      if (itemsPerPage !== 24) {
+      if (itemsPerPage !== WALLPAPERS_BATCH_SIZE) {
         params.set('limit', String(itemsPerPage));
       } else {
         params.delete('limit');
@@ -760,7 +828,7 @@ export default function App() {
       setCurrentPage(1);
       const params = new URLSearchParams(location.search);
       params.delete('page');
-      if (newLimit !== 24) {
+      if (newLimit !== WALLPAPERS_BATCH_SIZE) {
         params.set('limit', String(newLimit));
       } else {
         params.delete('limit');
@@ -773,16 +841,25 @@ export default function App() {
     [location.pathname, location.search, location.hash, navigate]
   );
 
-  // Strict DOM recycling: Only the active page's items are passed to the DOM,
-  // completely unmounting off-screen DOM nodes and releasing video decoder resources
+  // Strict DOM hygiene:
+  // When Supabase batch mode is active, wallpapers holds ONLY the fetched page (or Load More batches).
+  // When local fallback mode is active, slice the current page.
   const displayedDesktopWallpapers = useMemo(() => {
+    if (isSupabaseConfigured) {
+      return filteredDesktopWallpapers;
+    }
     const startIndex = (currentPage - 1) * itemsPerPage;
     return filteredDesktopWallpapers.slice(startIndex, startIndex + itemsPerPage);
   }, [filteredDesktopWallpapers, currentPage, itemsPerPage]);
 
   // Admin bulk and management actions
   const handleAddWallpapers = useCallback((newItems: Wallpaper[]) => {
-    setWallpapers((prev) => [...newItems, ...prev]);
+    setWallpapers((prev) => {
+      const existing = new Set(prev.map((w) => w.id));
+      const unique = newItems.filter((w) => !existing.has(w.id));
+      return [...unique, ...prev];
+    });
+    setDesktopTotalCount((c) => c + newItems.filter((w) => !isMobileWallpaper(w)).length);
   }, []);
 
   const handleUpdateWallpaper = useCallback((updated: Wallpaper) => {
@@ -792,6 +869,7 @@ export default function App() {
   const handleDeleteWallpaper = useCallback(async (id: string) => {
     // Synchronize React state after Supabase deletion succeeds
     setWallpapers((prev) => prev.filter((w) => w.id !== id));
+    setDesktopTotalCount((c) => Math.max(0, c - 1));
 
     // Clean up favorites and download history if this wallpaper was present
     setCurrentUser((prevUser) => {
@@ -1039,11 +1117,11 @@ export default function App() {
                       : t.categories[selectedCategory as Category] || selectedCategory}
                   </span>
                   <span className="text-[11px] sm:text-xs px-2 sm:px-2.5 py-0.5 rounded-full bg-[#181920] border border-[#272935] text-cyan-400 font-mono font-semibold">
-                    {filteredDesktopWallpapers.length}
+                    {effectiveDesktopTotal}
                   </span>
                 </h2>
                 <p className="text-xs text-neutral-400 mt-1">
-                  {filteredDesktopWallpapers.length} {t.wallpapersFound}
+                  {effectiveDesktopTotal} {t.wallpapersFound}
                   {searchQuery && (
                     <span>
                       {' '}
@@ -1165,12 +1243,40 @@ export default function App() {
                   </div>
                 </ErrorBoundary>
 
+                {/* Load More Batch Button (24 wallpapers per batch) */}
+                {isSupabaseConfigured && desktopHasMore && (
+                  <div className="mt-8 flex justify-center">
+                    <button
+                      type="button"
+                      onClick={handleLoadMoreDesktop}
+                      disabled={loadingMoreDesktop}
+                      className="inline-flex items-center justify-center gap-2.5 px-6 py-3 rounded-2xl bg-[#161822] hover:bg-[#1E2130] border border-cyan-500/40 hover:border-cyan-400 text-cyan-300 hover:text-white text-xs sm:text-sm font-black shadow-lg shadow-cyan-500/10 transition-all cursor-pointer disabled:opacity-60"
+                    >
+                      {loadingMoreDesktop ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin text-cyan-400" />
+                          <span>{lang === 'ar' ? 'جاري تحميل الدفعة التالية...' : 'Loading next 24 wallpapers...'}</span>
+                        </>
+                      ) : (
+                        <>
+                          <ChevronDown className="w-4 h-4 text-cyan-400" />
+                          <span>
+                            {lang === 'ar'
+                              ? `تحميل المزيد (+24) · المعروض ${displayedDesktopWallpapers.length} من ${effectiveDesktopTotal}`
+                              : `Load More (+24) · Showing ${displayedDesktopWallpapers.length} of ${effectiveDesktopTotal}`}
+                          </span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+
                 {/* Traditional High-Performance Pagination Bar */}
-                {filteredDesktopWallpapers.length > 0 && (
+                {effectiveDesktopTotal > 0 && (
                   <Pagination
                     currentPage={currentPage}
                     totalPages={totalPages}
-                    totalItems={filteredDesktopWallpapers.length}
+                    totalItems={effectiveDesktopTotal}
                     itemsPerPage={itemsPerPage}
                     onPageChange={handlePageChange}
                     onItemsPerPageChange={handleItemsPerPageChange}

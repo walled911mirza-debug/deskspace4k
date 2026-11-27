@@ -20,12 +20,17 @@ const VALID_CATEGORIES: Category[] = [
   'Mobile',
 ];
 
+export const WALLPAPERS_BATCH_SIZE = 24;
+
 export interface SupabaseWallpaperRow {
   id: string;
   slug?: string | null;
   title: { en?: string; ar?: string } | string | null;
+  title_ar?: string | null;
   file_url?: string | null;
   url?: string | null;
+  preview_url?: string | null;
+  full_url?: string | null;
   description?: { en?: string; ar?: string } | string | null;
   resolution?: string | null;
   width?: number | null;
@@ -161,26 +166,38 @@ export function mapRowToWallpaper(row: Record<string, any> | null | undefined): 
   const id = String(row.id).trim();
   if (!id) return null;
 
-  const title = parseLocalizedText(row.title, 'Untitled 4K Wallpaper');
-  const rawDescription = row.description !== undefined && row.description !== null
-    ? parseLocalizedText(row.description, title.en, title.ar)
-    : undefined;
+  const parsedTitle = parseLocalizedText(row.title, 'Untitled 4K Wallpaper');
+  const explicitTitleAr =
+    typeof row.title_ar === 'string' && row.title_ar.trim() ? row.title_ar.trim() : '';
+  const title = {
+    en: parsedTitle.en || explicitTitleAr || 'Untitled 4K Wallpaper',
+    ar: explicitTitleAr || parsedTitle.ar || parsedTitle.en || 'خلفية 4K',
+  };
+
+  const rawDescription =
+    row.description !== undefined && row.description !== null
+      ? parseLocalizedText(row.description, title.en, title.ar)
+      : undefined;
 
   const category = normalizeCategory(row.category);
-  const rawFileUrl = typeof row.file_url === 'string' && row.file_url.trim()
-    ? row.file_url.trim()
-    : typeof row.url === 'string' && row.url.trim()
-    ? row.url.trim()
-    : '';
-  const rawVideoUrl = typeof row.video_url === 'string' && row.video_url.trim()
-    ? row.video_url.trim()
-    : undefined;
-  const rawPosterUrl = typeof row.poster_url === 'string' && row.poster_url.trim()
-    ? row.poster_url.trim()
-    : undefined;
-  const rawThumbUrl = typeof row.thumbnail_url === 'string' && row.thumbnail_url.trim()
-    ? row.thumbnail_url.trim()
-    : undefined;
+  const rawFullUrl =
+    typeof row.full_url === 'string' && row.full_url.trim() ? row.full_url.trim() : '';
+  const rawPreviewUrl =
+    typeof row.preview_url === 'string' && row.preview_url.trim() ? row.preview_url.trim() : '';
+  const rawFileUrl =
+    typeof row.file_url === 'string' && row.file_url.trim()
+      ? row.file_url.trim()
+      : typeof row.url === 'string' && row.url.trim()
+      ? row.url.trim()
+      : '';
+  const rawVideoUrl =
+    typeof row.video_url === 'string' && row.video_url.trim() ? row.video_url.trim() : undefined;
+  const rawPosterUrl =
+    typeof row.poster_url === 'string' && row.poster_url.trim() ? row.poster_url.trim() : undefined;
+  const rawThumbUrl =
+    typeof row.thumbnail_url === 'string' && row.thumbnail_url.trim()
+      ? row.thumbnail_url.trim()
+      : undefined;
 
   const tags = parseStringArray(row.tags, [category, '4K Ultra HD']);
   const colorPalette = parseStringArray(row.color_palette, [
@@ -190,9 +207,8 @@ export function mapRowToWallpaper(row: Record<string, any> | null | undefined): 
     '#F8FAFC',
   ]);
 
-  const rawResolution = typeof row.resolution === 'string' && row.resolution.trim()
-    ? row.resolution.trim()
-    : '';
+  const rawResolution =
+    typeof row.resolution === 'string' && row.resolution.trim() ? row.resolution.trim() : '';
   const parsedDims = rawResolution ? parseResolutionDimensions(rawResolution) : null;
 
   const isMobileFromFields = Boolean(
@@ -218,17 +234,35 @@ export function mapRowToWallpaper(row: Record<string, any> | null | undefined): 
       ? '9:16'
       : '16:9';
 
+  const fullUrl =
+    rawFullUrl || rawVideoUrl || rawFileUrl || rawPosterUrl || rawThumbUrl || rawPreviewUrl || '';
+  const previewUrl = rawPreviewUrl || rawThumbUrl || rawPosterUrl || fullUrl || '';
+
   const inferredVideo = Boolean(
     row.is_live ||
       rawVideoUrl ||
       row.format_type === 'video' ||
-      isVideoUrl(rawFileUrl)
+      isVideoUrl(fullUrl) ||
+      isVideoUrl(rawFileUrl) ||
+      isVideoUrl(previewUrl)
   );
 
-  const videoUrl = rawVideoUrl || (inferredVideo && isVideoUrl(rawFileUrl) ? rawFileUrl : undefined);
-  const url = rawFileUrl || rawPosterUrl || rawThumbUrl || videoUrl || '';
-  const posterUrl = rawPosterUrl || (!isVideoUrl(url) && url ? url : undefined);
-  const thumbnailUrl = rawThumbUrl || posterUrl || (!isVideoUrl(url) && url ? url : undefined);
+  const videoUrl =
+    rawVideoUrl ||
+    (isVideoUrl(fullUrl) ? fullUrl : undefined) ||
+    (isVideoUrl(rawFileUrl) ? rawFileUrl : undefined) ||
+    (isVideoUrl(previewUrl) ? previewUrl : undefined);
+  const url = fullUrl || rawFileUrl || previewUrl || videoUrl || '';
+  const posterUrl =
+    rawPosterUrl ||
+    (previewUrl && !isVideoUrl(previewUrl) ? previewUrl : undefined) ||
+    (!isVideoUrl(url) && url ? url : undefined);
+  const thumbnailUrl =
+    rawThumbUrl ||
+    (previewUrl && !isVideoUrl(previewUrl) ? previewUrl : undefined) ||
+    posterUrl ||
+    previewUrl ||
+    (!isVideoUrl(url) && url ? url : undefined);
 
   const createdAtRaw = typeof row.created_at === 'string' ? row.created_at : '';
   const createdAt =
@@ -246,6 +280,8 @@ export function mapRowToWallpaper(row: Record<string, any> | null | undefined): 
     width,
     height,
     url,
+    previewUrl: previewUrl || undefined,
+    fullUrl: fullUrl || undefined,
     aspectRatio,
     downloads: Number(row.downloads) || 0,
     favorites: Number(row.favorites) || 0,
@@ -271,6 +307,10 @@ export function mapWallpaperToRow(wp: Wallpaper): SupabaseWallpaperRow {
       ? { en: wp.description, ar: wp.description }
       : wp.description || { en: wp.title?.en || '', ar: wp.title?.ar || wp.title?.en || '' };
 
+  const resolvedFullUrl = wp.fullUrl?.trim() || wp.videoUrl?.trim() || wp.url?.trim() || '';
+  const resolvedPreviewUrl =
+    wp.previewUrl?.trim() || wp.thumbnailUrl?.trim() || wp.posterUrl?.trim() || resolvedFullUrl || '';
+
   return {
     id: wp.id,
     slug: safeSlug,
@@ -278,16 +318,19 @@ export function mapWallpaperToRow(wp: Wallpaper): SupabaseWallpaperRow {
       en: wp.title?.en || 'Untitled Wallpaper',
       ar: wp.title?.ar || wp.title?.en || 'خلفية 4K',
     },
-    file_url: wp.url || '',
+    title_ar: wp.title?.ar || wp.title?.en || 'خلفية 4K',
+    file_url: resolvedFullUrl || resolvedPreviewUrl,
+    preview_url: resolvedPreviewUrl || null,
+    full_url: resolvedFullUrl || null,
     description: safeDesc,
     resolution: wp.resolution || `${wp.width || 3840}×${wp.height || 2160}`,
     width: wp.width || 3840,
     height: wp.height || 2160,
     category: wp.category || 'Space',
     is_live: Boolean(wp.isLive),
-    video_url: wp.videoUrl || null,
-    thumbnail_url: wp.thumbnailUrl || null,
-    poster_url: wp.posterUrl || null,
+    video_url: wp.videoUrl || (isVideoUrl(resolvedFullUrl) ? resolvedFullUrl : null),
+    thumbnail_url: wp.thumbnailUrl || resolvedPreviewUrl || null,
+    poster_url: wp.posterUrl || (!isVideoUrl(resolvedPreviewUrl) ? resolvedPreviewUrl : null),
     aspect_ratio: wp.aspectRatio || (wp.deviceFormat === 'mobile' ? '9:16' : '16:9'),
     downloads: Number(wp.downloads) || 0,
     favorites: Number(wp.favorites) || 0,
@@ -307,10 +350,15 @@ function buildCoreRowFallback(row: SupabaseWallpaperRow): Record<string, any> {
     id: row.id,
     slug: row.slug,
     title: row.title,
+    title_ar: row.title_ar,
     file_url: row.file_url,
+    preview_url: row.preview_url,
+    full_url: row.full_url,
     description: row.description,
     resolution: row.resolution,
     category: row.category,
+    tags: row.tags,
+    file_size: row.file_size,
     is_live: row.is_live,
     video_url: row.video_url,
     created_at: row.created_at,
@@ -331,7 +379,7 @@ async function upsertRowResilient(row: SupabaseWallpaperRow): Promise<{ data: an
   }
 
   let payload: Record<string, any> = { ...row };
-  const maxRetries = 6;
+  const maxRetries = 12;
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     const { data, error } = await supabase
@@ -351,12 +399,6 @@ async function upsertRowResilient(row: SupabaseWallpaperRow): Promise<{ data: an
       continue;
     }
 
-    // If schema has only core columns or rejects extra fields, try core payload once
-    if (attempt === 0 && Object.keys(payload).length > 10) {
-      payload = buildCoreRowFallback(row);
-      continue;
-    }
-
     // If title/description column is TEXT instead of JSONB
     if (/invalid input syntax|cannot cast|malformed/i.test(msg) && typeof payload.title === 'object') {
       payload = {
@@ -367,6 +409,12 @@ async function upsertRowResilient(row: SupabaseWallpaperRow): Promise<{ data: an
             ? (row.description as any).en || ''
             : row.description,
       };
+      continue;
+    }
+
+    // Fallback to core fields if schema rejects extended optional columns
+    if (attempt < maxRetries - 2 && Object.keys(payload).length > 14) {
+      payload = buildCoreRowFallback(row);
       continue;
     }
 
@@ -522,49 +570,183 @@ export interface FetchWallpapersResult {
   configured: boolean;
 }
 
+export interface FetchWallpapersBatchOptions {
+  page?: number;
+  limit?: number;
+  deviceFormat?: 'desktop' | 'mobile' | 'all';
+  category?: string;
+  sortBy?: 'latest' | 'popular' | 'favorites';
+  searchQuery?: string;
+}
+
+export interface FetchWallpapersBatchResult {
+  wallpapers: Wallpaper[];
+  totalCount: number;
+  page: number;
+  limit: number;
+  hasMore: boolean;
+  error: string | null;
+  configured: boolean;
+}
+
+function sanitizeSearchFilterToken(raw: string): string {
+  return raw.replace(/[,()*%\\]/g, ' ').trim();
+}
+
 /**
- * Fetches all wallpapers from public.wallpapers safely.
- * Never throws; returns structured result even when Supabase is unconfigured or offline.
+ * High-performance paginated query (24 wallpapers per batch by default) built to scale cleanly to 4,000+ records.
+ * Uses Supabase .range() + { count: 'exact' } and gracefully adapts to legacy schemas.
  */
-export async function fetchWallpapersFromSupabase(): Promise<FetchWallpapersResult> {
+export async function fetchWallpapersBatchFromSupabase(
+  options: FetchWallpapersBatchOptions = {}
+): Promise<FetchWallpapersBatchResult> {
+  const limit = Math.max(1, Math.min(100, options.limit ?? WALLPAPERS_BATCH_SIZE));
+  const page = Math.max(1, options.page ?? 1);
+
   if (!supabase || !isSupabaseConfigured) {
     return {
       wallpapers: [],
-      error: supabaseConfigError || 'Supabase environment variables (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY) are missing or invalid.',
+      totalCount: 0,
+      page,
+      limit,
+      hasMore: false,
+      error:
+        supabaseConfigError ||
+        'Supabase environment variables (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY) are missing or invalid.',
       configured: false,
     };
   }
 
-  try {
-    const { data, error } = await supabase
-      .from(WALLPAPERS_TABLE)
-      .select('*')
-      .order('created_at', { ascending: false });
+  const from = (page - 1) * limit;
+  const to = from + limit - 1;
+  const deviceFormat = options.deviceFormat ?? 'desktop';
+  const category = options.category ?? 'All';
+  const sortBy = options.sortBy ?? 'latest';
+  const search = sanitizeSearchFilterToken(options.searchQuery || '');
 
-    if (error) {
+  const runQuery = async (useStrictDeviceCols: boolean, searchMode: 'jsonb_and_ar' | 'text_only' | 'none') => {
+    let query = supabase!
+      .from(WALLPAPERS_TABLE)
+      .select('*', { count: 'exact' });
+
+    if (deviceFormat === 'desktop') {
+      query = query.neq('category', 'Mobile');
+      if (useStrictDeviceCols) {
+        query = query.or('is_mobile.is.null,is_mobile.eq.false');
+      }
+    } else if (deviceFormat === 'mobile') {
+      if (useStrictDeviceCols) {
+        query = query.or('is_mobile.eq.true,device_format.eq.mobile,aspect_ratio.eq.9:16,category.eq.Mobile');
+      } else {
+        query = query.eq('category', 'Mobile');
+      }
+    }
+
+    if (category === 'Live') {
+      query = query.eq('is_live', true);
+    } else if (category && category !== 'All' && category !== 'Blog' && category !== 'MobileLive') {
+      query = query.eq('category', category);
+    }
+
+    if (search && searchMode !== 'none') {
+      const pattern = `%${search}%`;
+      if (searchMode === 'jsonb_and_ar') {
+        query = query.or(
+          `title->>en.ilike.${pattern},title->>ar.ilike.${pattern},title_ar.ilike.${pattern},category.ilike.${pattern},slug.ilike.${pattern}`
+        );
+      } else {
+        query = query.or(`title.ilike.${pattern},category.ilike.${pattern},slug.ilike.${pattern}`);
+      }
+    }
+
+    if (sortBy === 'popular') {
+      query = query.order('downloads', { ascending: false }).order('created_at', { ascending: false });
+    } else if (sortBy === 'favorites') {
+      query = query.order('favorites', { ascending: false }).order('created_at', { ascending: false });
+    } else {
+      query = query.order('created_at', { ascending: false });
+    }
+
+    return query.range(from, to);
+  };
+
+  try {
+    let result = await runQuery(true, search ? 'jsonb_and_ar' : 'none');
+
+    // Gracefully adapt if legacy schema lacks is_mobile/title_ar or uses TEXT title instead of JSONB
+    if (result.error) {
+      const msg = result.error.message || '';
+      const missingCol = extractMissingColumnName(msg);
+      const isOperatorErr = /operator does not exist|cannot extract|jsonb/i.test(msg);
+
+      if (missingCol || isOperatorErr) {
+        const retrySearchMode = search ? (isOperatorErr || missingCol === 'title_ar' ? 'text_only' : 'jsonb_and_ar') : 'none';
+        const useDeviceCols = missingCol !== 'is_mobile' && missingCol !== 'device_format' && missingCol !== 'aspect_ratio';
+        result = await runQuery(useDeviceCols, retrySearchMode);
+
+        // Final safe retry with minimal filter if search still conflicts with column types
+        if (result.error && search) {
+          result = await runQuery(false, 'none');
+        }
+      }
+    }
+
+    if (result.error) {
       return {
         wallpapers: [],
-        error: error.message || 'Failed to load wallpapers from Supabase.',
+        totalCount: 0,
+        page,
+        limit,
+        hasMore: false,
+        error: result.error.message || 'Failed to load wallpapers from Supabase.',
         configured: true,
       };
     }
 
-    const mapped = (Array.isArray(data) ? data : [])
+    const mapped = (Array.isArray(result.data) ? result.data : [])
       .map((row) => mapRowToWallpaper(row))
       .filter((item): item is Wallpaper => Boolean(item));
 
+    const totalCount = typeof result.count === 'number' ? result.count : from + mapped.length;
+    const hasMore = from + mapped.length < totalCount;
+
     return {
       wallpapers: mapped,
+      totalCount,
+      page,
+      limit,
+      hasMore,
       error: null,
       configured: true,
     };
   } catch (err: any) {
     return {
       wallpapers: [],
+      totalCount: 0,
+      page,
+      limit,
+      hasMore: false,
       error: err?.message || 'Network error while fetching wallpapers from Supabase.',
       configured: true,
     };
   }
+}
+
+/**
+ * Fetches initial batch safely (kept backwards-compatible for existing callers).
+ */
+export async function fetchWallpapersFromSupabase(limit: number = WALLPAPERS_BATCH_SIZE): Promise<FetchWallpapersResult> {
+  const batch = await fetchWallpapersBatchFromSupabase({
+    page: 1,
+    limit,
+    deviceFormat: 'all',
+    sortBy: 'latest',
+  });
+  return {
+    wallpapers: batch.wallpapers,
+    error: batch.error,
+    configured: batch.configured,
+  };
 }
 
 /**
@@ -740,6 +922,10 @@ export async function createWallpaperWithSync(
   }
 
   const safeExistingUrl = finalWp.url && !finalWp.url.startsWith('idb://') ? finalWp.url : '';
+  const safeExistingFullUrl =
+    finalWp.fullUrl && !finalWp.fullUrl.startsWith('idb://') ? finalWp.fullUrl : '';
+  const safeExistingPreviewUrl =
+    finalWp.previewUrl && !finalWp.previewUrl.startsWith('idb://') ? finalWp.previewUrl : '';
   const safeExistingVideoUrl =
     finalWp.videoUrl && !finalWp.videoUrl.startsWith('idb://') ? finalWp.videoUrl : undefined;
   const safeExistingPosterUrl =
@@ -747,15 +933,28 @@ export async function createWallpaperWithSync(
   const safeExistingThumbUrl =
     finalWp.thumbnailUrl && !finalWp.thumbnailUrl.startsWith('idb://') ? finalWp.thumbnailUrl : undefined;
 
+  const resolvedFullUrl =
+    uploadedVideoUrl || uploadedImageUrl || safeExistingFullUrl || safeExistingVideoUrl || safeExistingUrl || uploadedPosterUrl || '';
+  const resolvedPreviewUrl =
+    uploadedThumbUrl ||
+    uploadedPosterUrl ||
+    uploadedImageUrl ||
+    safeExistingPreviewUrl ||
+    safeExistingThumbUrl ||
+    safeExistingPosterUrl ||
+    resolvedFullUrl;
+
   finalWp = {
     ...finalWp,
-    url: uploadedImageUrl || uploadedPosterUrl || uploadedVideoUrl || safeExistingUrl,
-    videoUrl: uploadedVideoUrl || safeExistingVideoUrl,
-    posterUrl: uploadedImageUrl || uploadedPosterUrl || safeExistingPosterUrl,
-    thumbnailUrl: uploadedThumbUrl || uploadedImageUrl || uploadedPosterUrl || safeExistingThumbUrl,
+    url: resolvedFullUrl || resolvedPreviewUrl,
+    fullUrl: resolvedFullUrl || undefined,
+    previewUrl: resolvedPreviewUrl || undefined,
+    videoUrl: uploadedVideoUrl || safeExistingVideoUrl || (isVideoUrl(resolvedFullUrl) ? resolvedFullUrl : undefined),
+    posterUrl: uploadedImageUrl || uploadedPosterUrl || safeExistingPosterUrl || (!isVideoUrl(resolvedPreviewUrl) ? resolvedPreviewUrl : undefined),
+    thumbnailUrl: uploadedThumbUrl || uploadedImageUrl || uploadedPosterUrl || safeExistingThumbUrl || resolvedPreviewUrl || undefined,
   };
 
-  if (!finalWp.url) {
+  if (!finalWp.url && !finalWp.fullUrl && !finalWp.previewUrl) {
     return {
       wallpaper: finalWp,
       syncedToSupabase: false,
@@ -915,6 +1114,139 @@ export async function deleteWallpaperWithSync(
     success: dbDeleted && errors.length === 0,
     syncedToSupabase: dbDeleted && errors.length === 0,
     error: errors.length > 0 ? errors.join(' | ') : null,
+  };
+}
+
+export interface BulkImportSyncResult {
+  importedWallpapers: Wallpaper[];
+  importedCount: number;
+  failedCount: number;
+  errors: string[];
+  error: string | null;
+}
+
+async function upsertBatchResilient(rows: SupabaseWallpaperRow[]): Promise<{ data: any[] | null; error: string | null }> {
+  if (!supabase) {
+    return { data: null, error: supabaseConfigError || 'Supabase not configured' };
+  }
+
+  let payloads: Record<string, any>[] = rows.map((r) => ({ ...r }));
+  const maxRetries = 12;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const { data, error } = await supabase
+      .from(WALLPAPERS_TABLE)
+      .upsert(payloads, { onConflict: 'id' })
+      .select();
+
+    if (!error) {
+      return { data: Array.isArray(data) ? data : [], error: null };
+    }
+
+    const msg = error.message || '';
+    const missingCol = extractMissingColumnName(msg);
+    if (missingCol && payloads.some((p) => missingCol in p)) {
+      payloads = payloads.map((p) => {
+        const copy = { ...p };
+        delete copy[missingCol];
+        return copy;
+      });
+      continue;
+    }
+
+    if (/invalid input syntax|cannot cast|malformed/i.test(msg) && payloads.some((p) => typeof p.title === 'object')) {
+      payloads = payloads.map((p, idx) => ({
+        ...p,
+        title: (rows[idx]?.title as any)?.en || String(rows[idx]?.title || ''),
+        description:
+          typeof rows[idx]?.description === 'object' && rows[idx]?.description
+            ? (rows[idx].description as any).en || ''
+            : rows[idx]?.description,
+      }));
+      continue;
+    }
+
+    return { data: null, error: msg || 'Batch upsert failed' };
+  }
+
+  return { data: null, error: 'Unable to match public.wallpapers columns during batch import' };
+}
+
+/**
+ * High-throughput chunked bulk import (50 items per request) built to import hundreds/thousands of wallpapers safely.
+ */
+export async function bulkImportWallpapersToSupabase(
+  wallpapers: Wallpaper[],
+  chunkSize: number = 50,
+  onProgress?: (importedSoFar: number, total: number) => void
+): Promise<BulkImportSyncResult> {
+  if (!supabase || !isSupabaseConfigured) {
+    return {
+      importedWallpapers: [],
+      importedCount: 0,
+      failedCount: wallpapers.length,
+      errors: [
+        supabaseConfigError ||
+          'Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.',
+      ],
+      error:
+        supabaseConfigError ||
+        'Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.',
+    };
+  }
+
+  if (!Array.isArray(wallpapers) || wallpapers.length === 0) {
+    return {
+      importedWallpapers: [],
+      importedCount: 0,
+      failedCount: 0,
+      errors: [],
+      error: 'No valid wallpapers provided for bulk import.',
+    };
+  }
+
+  const importedWallpapers: Wallpaper[] = [];
+  const errors: string[] = [];
+  let failedCount = 0;
+
+  for (let i = 0; i < wallpapers.length; i += chunkSize) {
+    const chunk = wallpapers.slice(i, i + chunkSize);
+    const rows = chunk.map((wp) => mapWallpaperToRow(wp));
+
+    try {
+      const batchRes = await upsertBatchResilient(rows);
+      if (!batchRes.error && batchRes.data) {
+        const mappedList = batchRes.data
+          .map((r) => mapRowToWallpaper(r))
+          .filter((w): w is Wallpaper => Boolean(w));
+        importedWallpapers.push(...(mappedList.length > 0 ? mappedList : chunk));
+      } else {
+        // Fallback per row so a single bad row doesn't fail the entire chunk
+        for (let rIdx = 0; rIdx < rows.length; rIdx++) {
+          const singleRes = await upsertRowResilient(rows[rIdx]);
+          if (!singleRes.error) {
+            const mappedSingle = singleRes.data ? mapRowToWallpaper(singleRes.data) : null;
+            importedWallpapers.push(mappedSingle || chunk[rIdx]);
+          } else {
+            failedCount++;
+            errors.push(`"${chunk[rIdx]?.title?.en || chunk[rIdx]?.id}": ${singleRes.error}`);
+          }
+        }
+      }
+    } catch (err: any) {
+      failedCount += chunk.length;
+      errors.push(err?.message || 'Unexpected batch network error');
+    }
+
+    onProgress?.(Math.min(i + chunk.length, wallpapers.length), wallpapers.length);
+  }
+
+  return {
+    importedWallpapers,
+    importedCount: importedWallpapers.length,
+    failedCount,
+    errors,
+    error: importedWallpapers.length === 0 && errors.length > 0 ? errors[0] : null,
   };
 }
 

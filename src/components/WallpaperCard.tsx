@@ -53,13 +53,32 @@ const WallpaperCardComponent: React.FC<WallpaperCardProps> = ({
     extractResolutionFromTitle(rawTitle) ||
     (wallpaper.resolution ? wallpaper.resolution.replace(/\s*[xX]\s*/g, '×').trim() : (wallpaper.aspectRatio === '9:16' ? '2160×3840' : '3840×2160'));
 
+  // Grid browsing uses ONLY preview_url (falling back to full_url only when preview_url is null/empty)
+  const rawPreviewTarget =
+    (wallpaper.previewUrl && wallpaper.previewUrl.trim() !== '' ? wallpaper.previewUrl.trim() : '') ||
+    (wallpaper.thumbnailUrl && wallpaper.thumbnailUrl.trim() !== '' ? wallpaper.thumbnailUrl.trim() : '') ||
+    (wallpaper.posterUrl && wallpaper.posterUrl.trim() !== '' ? wallpaper.posterUrl.trim() : '') ||
+    (wallpaper.fullUrl && wallpaper.fullUrl.trim() !== '' ? wallpaper.fullUrl.trim() : '') ||
+    (wallpaper.url && wallpaper.url.trim() !== '' ? wallpaper.url.trim() : '') ||
+    (wallpaper.videoUrl && wallpaper.videoUrl.trim() !== '' ? wallpaper.videoUrl.trim() : '');
+
+  const staticPosterCandidate =
+    (wallpaper.posterUrl && !isVideoUrl(wallpaper.posterUrl) ? wallpaper.posterUrl.trim() : '') ||
+    (wallpaper.thumbnailUrl && !isVideoUrl(wallpaper.thumbnailUrl) ? wallpaper.thumbnailUrl.trim() : '') ||
+    (wallpaper.previewUrl && !isVideoUrl(wallpaper.previewUrl) ? wallpaper.previewUrl.trim() : '') ||
+    (!isVideoUrl(rawPreviewTarget) ? rawPreviewTarget : '');
+
+  const previewIsDirectVideo = Boolean(rawPreviewTarget && isVideoUrl(rawPreviewTarget));
+  const shouldAutoPlayPreviewVideo = Boolean(previewIsDirectVideo && !staticPosterCandidate);
+
   // Check whether this item has live motion / video capability
   const isLiveMedia = Boolean(
-    wallpaper.isLive &&
-      (wallpaper.videoUrl ||
-        wallpaper.formatType === 'video' ||
-        isVideoUrl(wallpaper.url) ||
-        isVideoUrl(wallpaper.videoUrl))
+    wallpaper.isLive ||
+      previewIsDirectVideo ||
+      wallpaper.videoUrl ||
+      wallpaper.formatType === 'video' ||
+      isVideoUrl(wallpaper.url) ||
+      isVideoUrl(wallpaper.fullUrl)
   );
 
   const safeTags = Array.isArray(wallpaper.tags) ? wallpaper.tags : [];
@@ -72,24 +91,26 @@ const WallpaperCardComponent: React.FC<WallpaperCardProps> = ({
   );
 
   const isVideo = isLiveMedia && !videoError;
-  const [resolvedVideoSource, setResolvedVideoSource] = useState<string>(
-    wallpaper.videoUrl || wallpaper.url || ''
-  );
+  // Strictly prioritize previewUrl when it is already a video stream; never touch fullUrl in grid if previewUrl video exists
+  const gridVideoCandidate = previewIsDirectVideo
+    ? rawPreviewTarget
+    : wallpaper.videoUrl || (isVideoUrl(wallpaper.fullUrl) ? wallpaper.fullUrl : '') || (isVideoUrl(wallpaper.url) ? wallpaper.url : '') || '';
+
+  const [resolvedVideoSource, setResolvedVideoSource] = useState<string>(gridVideoCandidate);
 
   // Lightweight preview URL for images & video posters
-  const rawTargetInitial = wallpaper.thumbnailUrl || wallpaper.posterUrl || (isLiveMedia ? undefined : wallpaper.url);
-  const initialPreviewUrl = rawTargetInitial && rawTargetInitial.trim() !== ''
-    ? getOptimizedPreviewUrl(rawTargetInitial, 640, wallpaper.category)
-    : getCategoryFallback(wallpaper.category);
+  const initialPreviewUrl =
+    staticPosterCandidate && staticPosterCandidate.trim() !== ''
+      ? getOptimizedPreviewUrl(staticPosterCandidate, 640, wallpaper.category)
+      : getCategoryFallback(wallpaper.category);
   const [currentImgSrc, setCurrentImgSrc] = useState<string>(initialPreviewUrl);
 
   // Asynchronously resolve IndexedDB persistent blobs (e.g., idb://media/:id or stale blob: URLs)
   useEffect(() => {
     let isMounted = true;
-    const rawTarget = wallpaper.thumbnailUrl || wallpaper.posterUrl || (isLiveMedia ? undefined : wallpaper.url);
+    const rawImgTarget = staticPosterCandidate;
 
-    // Strict null-check: if no media target exists at all, fallback immediately
-    if (!rawTarget || rawTarget.trim() === '' || rawTarget === 'null' || rawTarget === 'undefined') {
+    if (!rawImgTarget || rawImgTarget.trim() === '' || rawImgTarget === 'null' || rawImgTarget === 'undefined') {
       const catFallback = getCategoryFallback(wallpaper.category);
       if (catFallback) {
         setCurrentImgSrc(catFallback);
@@ -98,18 +119,16 @@ const WallpaperCardComponent: React.FC<WallpaperCardProps> = ({
         setHasPermanentError(true);
         setImageLoaded(true);
       }
-      return;
+    } else {
+      setCurrentImgSrc(getOptimizedPreviewUrl(rawImgTarget, 640, wallpaper.category));
+      setFallbackLevel(0);
+      setHasPermanentError(false);
     }
 
-    // Initial preview setup
-    setCurrentImgSrc(getOptimizedPreviewUrl(rawTarget, 640, wallpaper.category));
-    setFallbackLevel(0);
-    setHasPermanentError(false);
     setVideoError(false);
 
-    // Resolve persistent custom media from IndexedDB if needed
-    if (rawTarget && (rawTarget.startsWith('idb://') || rawTarget.startsWith('blob:'))) {
-      safeResolveMediaUrl(wallpaper.id, rawTarget, wallpaper.category, currentTitle).then((resolved) => {
+    if (rawImgTarget && (rawImgTarget.startsWith('idb://') || rawImgTarget.startsWith('blob:'))) {
+      safeResolveMediaUrl(wallpaper.id, rawImgTarget, wallpaper.category, currentTitle).then((resolved) => {
         if (isMounted) {
           if (resolved && resolved.trim() !== '') {
             setCurrentImgSrc(resolved);
@@ -120,8 +139,8 @@ const WallpaperCardComponent: React.FC<WallpaperCardProps> = ({
       });
     }
 
-    // Resolve video source if needed with strict null-checks
-    const rawVideo = wallpaper.videoUrl || wallpaper.url;
+    // Resolve grid video source cleanly
+    const rawVideo = gridVideoCandidate;
     if (rawVideo && (rawVideo.startsWith('idb://') || rawVideo.startsWith('blob:'))) {
       safeResolveMediaUrl(wallpaper.id, rawVideo, wallpaper.category, currentTitle).then((resolved) => {
         if (isMounted) {
@@ -147,11 +166,14 @@ const WallpaperCardComponent: React.FC<WallpaperCardProps> = ({
   }, [
     wallpaper.id,
     wallpaper.url,
+    wallpaper.previewUrl,
+    wallpaper.fullUrl,
     wallpaper.videoUrl,
     wallpaper.posterUrl,
     wallpaper.thumbnailUrl,
     wallpaper.category,
-    isLiveMedia,
+    staticPosterCandidate,
+    gridVideoCandidate,
     currentTitle,
   ]);
 
@@ -187,7 +209,6 @@ const WallpaperCardComponent: React.FC<WallpaperCardProps> = ({
           const inView = entry.isIntersecting;
           setIsInViewport(inView);
           if (!inView) {
-            // Cancel any pending debounce timer
             if (hoverDebounceTimerRef.current) {
               clearTimeout(hoverDebounceTimerRef.current);
               hoverDebounceTimerRef.current = null;
@@ -220,16 +241,13 @@ const WallpaperCardComponent: React.FC<WallpaperCardProps> = ({
   const handleMouseEnter = useCallback(() => {
     setIsHovered(true);
 
-    // Cancel any existing debounce timer to avoid overlaps
     if (hoverDebounceTimerRef.current) {
       clearTimeout(hoverDebounceTimerRef.current);
       hoverDebounceTimerRef.current = null;
     }
 
-    // Only initiate debounced hover if this card is a live video in viewport with no error
     if (!isVideo || !isInViewport || videoError) return;
 
-    // Strict 150ms debounce before confirming hover intent and lazy-loading the video stream
     hoverDebounceTimerRef.current = setTimeout(() => {
       if (isMountedRef.current && isInViewport) {
         setIsHoverIntentConfirmed(true);
@@ -237,16 +255,16 @@ const WallpaperCardComponent: React.FC<WallpaperCardProps> = ({
     }, 150);
   }, [isVideo, isInViewport, videoError]);
 
-  // 2. Hardware Acceleration & Resource Cleanup on mouse leave:
-  // Immediately pauses, resets currentTime to 0, and releases hardware decoder/memory buffers
+  // 2. Hardware Acceleration & Resource Cleanup on mouse leave
   const handleMouseLeave = useCallback(() => {
-    // Immediately cancel debounce timer if mouse leaves before 150ms
     if (hoverDebounceTimerRef.current) {
       clearTimeout(hoverDebounceTimerRef.current);
       hoverDebounceTimerRef.current = null;
     }
 
     setIsHovered(false);
+    if (shouldAutoPlayPreviewVideo) return;
+
     setIsHoverIntentConfirmed(false);
     setIsVideoPlaying(false);
 
@@ -256,8 +274,6 @@ const WallpaperCardComponent: React.FC<WallpaperCardProps> = ({
         try {
           video.pause();
           video.currentTime = 0;
-          // Explicitly purge src attribute and call load() to release hardware video decoder
-          // handles, GPU texture buffers, and network chunk caches in Chromium and WebKit
           video.removeAttribute('src');
           video.load();
         } catch {
@@ -272,21 +288,29 @@ const WallpaperCardComponent: React.FC<WallpaperCardProps> = ({
         releaseMediaBuffers();
       }
     }
-  }, []);
+  }, [shouldAutoPlayPreviewVideo]);
 
-  // Playback handler triggered ONLY when hover intent has been confirmed (150ms elapsed)
+  const shouldRenderVideo = Boolean(
+    isVideo &&
+      resolvedVideoSource &&
+      resolvedVideoSource.trim() !== '' &&
+      !videoError &&
+      ((shouldAutoPlayPreviewVideo && isInViewport) || isHoverIntentConfirmed)
+  );
+
+  // Playback handler triggered when video mounts (viewport autoplay for video-only previewUrl or confirmed 150ms hover)
   useEffect(() => {
-    if (!isHoverIntentConfirmed || !isVideo || videoError) return;
+    if (!shouldRenderVideo) return;
 
     const video = videoRef.current;
     if (video) {
       playPromiseRef.current = video.play().catch((err) => {
         if (err?.name !== 'AbortError') {
-          console.warn('Hover video preview play deferred:', err);
+          console.warn('Grid video preview play deferred:', err);
         }
       });
     }
-  }, [isHoverIntentConfirmed, isVideo, videoError]);
+  }, [shouldRenderVideo]);
 
   // Image Fallback error handler: Transitions gracefully to Category Fallback, then Dark Neon,
   // and finally to the sleek branded DeskSpace4K Fallback Placeholder UI (never a broken box or empty card)
@@ -402,16 +426,16 @@ const WallpaperCardComponent: React.FC<WallpaperCardProps> = ({
           />
         )}
 
-        {/* Video Player: Strict null-check on resolvedVideoSource + lazy-loaded ONLY when 150ms hover intent is confirmed */}
-        {Boolean(isVideo && isHoverIntentConfirmed && resolvedVideoSource && resolvedVideoSource.trim() !== '' && !videoError) && (
+        {/* Video Player: Strictly uses lightweight preview_url video in grid when video-only, or lazy-loads on 150ms hover */}
+        {shouldRenderVideo && (
           <video
             ref={videoRef}
             src={resolvedVideoSource}
-            poster={wallpaper.posterUrl || undefined}
+            poster={staticPosterCandidate || undefined}
             loop
             muted
             playsInline
-            preload="auto"
+            preload={shouldAutoPlayPreviewVideo ? 'metadata' : 'auto'}
             autoPlay
             onLoadedData={() => setImageLoaded(true)}
             onPlaying={() => setIsVideoPlaying(true)}
@@ -430,7 +454,7 @@ const WallpaperCardComponent: React.FC<WallpaperCardProps> = ({
         )}
 
         {/* Subtle hover play hint for Live Wallpapers */}
-        {isVideo && !isHoverIntentConfirmed && (
+        {isVideo && !shouldRenderVideo && (
           <div className="absolute bottom-2 right-2 sm:bottom-2.5 sm:right-2.5 px-1.5 sm:px-2 py-0.5 rounded-md bg-black/75 backdrop-blur-md border border-white/10 text-[9px] sm:text-[10px] font-medium text-neutral-300 flex items-center gap-1 opacity-90 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
             <Play className="w-2.5 h-2.5 fill-rose-400 text-rose-400" />
             <span className="font-mono text-[8px] sm:text-[9px] text-neutral-200 hidden xs:inline sm:inline">
@@ -526,6 +550,8 @@ export const WallpaperCard = React.memo(
   (prev, next) =>
     prev.wallpaper.id === next.wallpaper.id &&
     prev.wallpaper.url === next.wallpaper.url &&
+    prev.wallpaper.previewUrl === next.wallpaper.previewUrl &&
+    prev.wallpaper.fullUrl === next.wallpaper.fullUrl &&
     prev.wallpaper.videoUrl === next.wallpaper.videoUrl &&
     prev.wallpaper.posterUrl === next.wallpaper.posterUrl &&
     prev.wallpaper.thumbnailUrl === next.wallpaper.thumbnailUrl &&

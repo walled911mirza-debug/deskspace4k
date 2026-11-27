@@ -20,6 +20,8 @@ export interface Wallpaper {
   width: number;
   height: number;
   url: string;
+  previewUrl?: string;
+  fullUrl?: string;
   aspectRatio: string;
   downloads: number;
   favorites: number;

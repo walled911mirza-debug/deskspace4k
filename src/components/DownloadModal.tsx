@@ -148,18 +148,28 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
         wallpaper.isLive &&
           (wallpaper.videoUrl ||
             wallpaper.formatType === 'video' ||
+            isVideoUrl(wallpaper.fullUrl) ||
             isVideoUrl(wallpaper.url) ||
-            isVideoUrl(wallpaper.videoUrl))
+            isVideoUrl(wallpaper.videoUrl) ||
+            isVideoUrl(wallpaper.previewUrl))
       );
+      const previewImgCandidate =
+        (wallpaper.previewUrl && !isVideoUrl(wallpaper.previewUrl) ? wallpaper.previewUrl : '') ||
+        wallpaper.posterUrl ||
+        wallpaper.thumbnailUrl ||
+        (!isVideoUrl(wallpaper.fullUrl) ? wallpaper.fullUrl : '') ||
+        (!isVideoUrl(wallpaper.url) ? wallpaper.url : '');
       const safeImg = isVid
-        ? (wallpaper.posterUrl || wallpaper.thumbnailUrl || getCategoryFallback(wallpaper.category))
-        : (wallpaper.posterUrl || wallpaper.url);
+        ? (previewImgCandidate || getCategoryFallback(wallpaper.category))
+        : (previewImgCandidate || wallpaper.url || getCategoryFallback(wallpaper.category));
       setPreviewImgUrl(safeImg);
       setVideoError(false);
     }
   }, [
     wallpaper?.id,
     wallpaper?.url,
+    wallpaper?.previewUrl,
+    wallpaper?.fullUrl,
     wallpaper?.videoUrl,
     wallpaper?.posterUrl,
     wallpaper?.thumbnailUrl,
@@ -184,11 +194,25 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
     try {
       const safeTitle = currentTitle.replace(/[^a-zA-Z0-9_\-\u0600-\u06FF]/g, '_').slice(0, 30) || 'Wallpaper';
       const filename = `DeskSpace4K_${safeTitle}_${selectedRes.width}x${selectedRes.height}`;
+      const originalFullUrl = (wallpaper.fullUrl || wallpaper.videoUrl || wallpaper.url || '').trim();
 
-      // If wallpaper.url is a video, use posterUrl or preview image for still frame canvas rendering
-      const imgUrlToUse = isVideoUrl(wallpaper.url)
-        ? (wallpaper.posterUrl || previewImgUrl || getCategoryFallback(wallpaper.category))
-        : (wallpaper.url || previewImgUrl);
+      // Direct original full_url download when 4K Original is selected and full_url is available
+      if (selectedRes.id === '4k' && originalFullUrl) {
+        const ext = detectMediaExtension(originalFullUrl, isVideoUrl(originalFullUrl) ? 'mp4' : 'jpg');
+        await downloadDirectMediaFile(originalFullUrl, filename, ext);
+        onRecordDownload(wallpaper, `${selectedRes.width}×${selectedRes.height}`);
+        setDownloadSuccess(true);
+        setTimeout(() => setDownloadSuccess(false), 4000);
+        return;
+      }
+
+      // If wallpaper source is a video, use posterUrl or preview image for still frame canvas rendering
+      const imgUrlToUse = isVideoUrl(originalFullUrl)
+        ? (wallpaper.posterUrl ||
+            (wallpaper.previewUrl && !isVideoUrl(wallpaper.previewUrl) ? wallpaper.previewUrl : '') ||
+            previewImgUrl ||
+            getCategoryFallback(wallpaper.category))
+        : (originalFullUrl || previewImgUrl);
 
       await downloadWallpaperWithResolution({
         imageUrl: imgUrlToUse,
@@ -215,14 +239,19 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
 
     try {
       const safeTitle = currentTitle.replace(/[^a-zA-Z0-9_\-\u0600-\u06FF]/g, '_').slice(0, 30) || 'Wallpaper';
-      const baseFilename = `DeskSpace4K_LiveMotion_${safeTitle}_1080p`;
+      const baseFilename = `DeskSpace4K_LiveMotion_${safeTitle}`;
 
-      const videoSrc = wallpaper.videoUrl || (isVideoUrl(wallpaper.url) ? wallpaper.url : null);
+      // Strictly prefer fullUrl for full-quality original download
+      const videoSrc =
+        (wallpaper.fullUrl && isVideoUrl(wallpaper.fullUrl) ? wallpaper.fullUrl : null) ||
+        wallpaper.videoUrl ||
+        (isVideoUrl(wallpaper.url) ? wallpaper.url : null) ||
+        wallpaper.fullUrl ||
+        null;
+
       if (videoSrc) {
-        // Genuine video file download (.mp4 or .webm)
         await downloadDirectMediaFile(videoSrc, baseFilename, detectMediaExtension(videoSrc, 'mp4'));
       } else {
-        // Canvas particle live motion loop
         await downloadLiveMotionVideo(wallpaper.url || previewImgUrl, wallpaper.category, baseFilename);
       }
 
@@ -244,8 +273,11 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
     try {
       const safeTitle = currentTitle.replace(/[^a-zA-Z0-9_\-\u0600-\u06FF]/g, '_').slice(0, 30) || 'Wallpaper';
       const baseFilename = `DeskSpace4K_${safeTitle}`;
-      const videoSrc = wallpaper.videoUrl || (isVideoUrl(wallpaper.url) ? wallpaper.url : null);
-      const mediaSource = videoSrc || wallpaper.url || previewImgUrl;
+      const videoSrc =
+        (wallpaper.fullUrl && isVideoUrl(wallpaper.fullUrl) ? wallpaper.fullUrl : null) ||
+        wallpaper.videoUrl ||
+        (isVideoUrl(wallpaper.url) ? wallpaper.url : null);
+      const mediaSource = videoSrc || wallpaper.fullUrl || wallpaper.url || previewImgUrl;
 
       await downloadMobileLiveWallpaper(
         mediaSource,
@@ -387,9 +419,10 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
                   {/* Phone Notch/Island */}
                   <div className="w-16 h-3.5 bg-black rounded-full mb-1 z-20 shrink-0" />
                   <div className="relative w-full h-full rounded-[26px] overflow-hidden bg-black">
-                    {wallpaper.isLive && !videoError && (wallpaper.videoUrl || (wallpaper.url && /\.(mp4|webm|mov|avi)$/i.test(wallpaper.url))) ? (
+                    {wallpaper.isLive && !videoError && (wallpaper.previewUrl && isVideoUrl(wallpaper.previewUrl) || wallpaper.videoUrl || isVideoUrl(wallpaper.fullUrl) || isVideoUrl(wallpaper.url)) ? (
                       <video
-                        src={wallpaper.videoUrl || wallpaper.url}
+                        src={(wallpaper.previewUrl && isVideoUrl(wallpaper.previewUrl) ? wallpaper.previewUrl : '') || wallpaper.videoUrl || wallpaper.fullUrl || wallpaper.url}
+                        poster={wallpaper.posterUrl || undefined}
                         autoPlay
                         loop
                         muted
@@ -399,7 +432,7 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
                       />
                     ) : (
                       <img
-                        src={previewImgUrl || wallpaper.posterUrl || wallpaper.thumbnailUrl || getCategoryFallback(wallpaper.category)}
+                        src={previewImgUrl || wallpaper.previewUrl || wallpaper.posterUrl || wallpaper.thumbnailUrl || getCategoryFallback(wallpaper.category)}
                         alt={currentTitle}
                         referrerPolicy="no-referrer"
                         onError={() => {
@@ -423,22 +456,23 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
                   }`}
                   onClick={() => setPreviewZoom(!previewZoom)}
                 >
-                  {wallpaper.isLive && !videoError && (wallpaper.videoUrl || (wallpaper.url && /\.(mp4|webm|mov|avi)$/i.test(wallpaper.url))) ? (
+                  {wallpaper.isLive && !videoError && (wallpaper.previewUrl && isVideoUrl(wallpaper.previewUrl) || wallpaper.videoUrl || isVideoUrl(wallpaper.fullUrl) || isVideoUrl(wallpaper.url)) ? (
                     <video
-                      src={wallpaper.videoUrl || wallpaper.url}
+                      src={(wallpaper.previewUrl && isVideoUrl(wallpaper.previewUrl) ? wallpaper.previewUrl : '') || wallpaper.videoUrl || wallpaper.fullUrl || wallpaper.url}
+                      poster={wallpaper.posterUrl || undefined}
                       autoPlay
                       loop
                       muted
                       playsInline
                       onError={() => {
-                        markUrlAsFailed(wallpaper.videoUrl || wallpaper.url);
+                        markUrlAsFailed(wallpaper.previewUrl || wallpaper.videoUrl || wallpaper.url);
                         setVideoError(true);
                       }}
                       className="w-full h-auto aspect-video object-cover"
                     />
                   ) : (
                     <img
-                      src={previewImgUrl || wallpaper.posterUrl || wallpaper.thumbnailUrl || getCategoryFallback(wallpaper.category)}
+                      src={previewImgUrl || wallpaper.previewUrl || wallpaper.posterUrl || wallpaper.thumbnailUrl || getCategoryFallback(wallpaper.category)}
                       alt={currentTitle}
                       referrerPolicy="no-referrer"
                       onError={() => {

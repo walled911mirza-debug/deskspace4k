@@ -81,7 +81,67 @@ import {
   createWallpaperWithSync,
   updateWallpaperWithSync,
   deleteWallpaperWithSync,
+  bulkImportWallpapersToSupabase,
 } from '../lib/wallpapersService';
+import {
+  isValidHttpUrl,
+  parseBulkInputText,
+  BulkImportValidationError,
+} from '../utils/bulkImportParser';
+
+const MAX_DIRECT_UPLOAD_BYTES = 50 * 1024 * 1024; // 50 MB direct storage upload cap
+
+const SAFE_SQL_MIGRATION_SCRIPT = `-- Safe, non-destructive migration to scale DeskSpace4K to 4,000+ animated wallpapers
+ALTER TABLE public.wallpapers
+  ADD COLUMN IF NOT EXISTS title TEXT,
+  ADD COLUMN IF NOT EXISTS title_ar TEXT,
+  ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'Space',
+  ADD COLUMN IF NOT EXISTS tags TEXT[] DEFAULT '{}',
+  ADD COLUMN IF NOT EXISTS preview_url TEXT,
+  ADD COLUMN IF NOT EXISTS full_url TEXT,
+  ADD COLUMN IF NOT EXISTS file_size TEXT DEFAULT '4K UHD',
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+
+UPDATE public.wallpapers
+SET preview_url = COALESCE(preview_url, thumbnail_url, poster_url, file_url)
+WHERE preview_url IS NULL;
+
+UPDATE public.wallpapers
+SET full_url = COALESCE(full_url, video_url, file_url, preview_url)
+WHERE full_url IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_wallpapers_created_at_desc ON public.wallpapers (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_wallpapers_category_created_at ON public.wallpapers (category, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_wallpapers_downloads_desc ON public.wallpapers (downloads DESC);`;
+
+const SAMPLE_BULK_JSON = JSON.stringify(
+  [
+    {
+      title: 'Cyberpunk Neon Horizon 4K',
+      title_ar: 'أفق السايبربانك النيوني 4K',
+      category: 'Gaming',
+      tags: ['Cyberpunk', '4K Live', 'OLED', '60 FPS'],
+      preview_url: 'https://cdn.example.com/previews/cyberpunk-horizon-preview.webp',
+      full_url: 'https://cdn.example.com/4k/cyberpunk-horizon-4k.mp4',
+      file_size: '28.4 MB',
+    },
+    {
+      title: 'Deep Space Nebula Drift',
+      title_ar: 'انجراف سديم الفضاء العميق',
+      category: 'Space',
+      tags: ['Space', 'Nebula', '4K Motion'],
+      preview_url: 'https://cdn.example.com/previews/nebula-drift-preview.webp',
+      full_url: 'https://cdn.example.com/4k/nebula-drift-4k.mp4',
+      file_size: '34.0 MB',
+    },
+  ],
+  null,
+  2
+);
+
+const SAMPLE_BULK_CSV = `title,title_ar,category,tags,preview_url,full_url,file_size
+Cyberpunk Neon Horizon 4K,أفق السايبربانك النيوني 4K,Gaming,"Cyberpunk,4K Live,OLED",https://cdn.example.com/previews/cyberpunk-horizon-preview.webp,https://cdn.example.com/4k/cyberpunk-horizon-4k.mp4,28.4 MB
+Deep Space Nebula Drift,انجراف سديم الفضاء العميق,Space,"Space,Nebula,4K Motion",https://cdn.example.com/previews/nebula-drift-preview.webp,https://cdn.example.com/4k/nebula-drift-4k.mp4,34.0 MB`;
 
 interface SecretAdminModalProps {
   isOpen: boolean;
@@ -456,8 +516,8 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
   const [passwordInput, setPasswordInput] = useState<string>('');
   const [authError, setAuthError] = useState<string | null>(null);
 
-  // Active Admin Tabs: manual, bulk, manage, articles, stats, copilot
-  const [adminTab, setAdminTab] = useState<'manual' | 'bulk' | 'manage' | 'articles' | 'stats' | 'copilot'>('manual');
+  // Active Admin Tabs: manual, import, bulk, manage, articles, stats, copilot
+  const [adminTab, setAdminTab] = useState<'manual' | 'import' | 'bulk' | 'manage' | 'articles' | 'stats' | 'copilot'>('manual');
 
   // ==========================================
   // Embedded Admin AI Copilot Assistant State
@@ -514,6 +574,9 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
   const [manualTags, setManualTags] = useState<string>('4K Ultra HD, Desktop, OLED Black');
   const [manualDescEn, setManualDescEn] = useState<string>('');
   const [manualDescAr, setManualDescAr] = useState<string>('');
+  const [manualPreviewUrl, setManualPreviewUrl] = useState<string>('');
+  const [manualFullUrl, setManualFullUrl] = useState<string>('');
+  const [manualFileSize, setManualFileSize] = useState<string>('');
   const [manualIsLive, setManualIsLive] = useState<boolean>(false);
   const [manualPublishing, setManualPublishing] = useState<boolean>(false);
   const [manualNotice, setManualNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -523,7 +586,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
   const manualVideoPlayerRef = useRef<HTMLVideoElement>(null);
 
   // ==========================================
-  // 2. Bulk Upload State
+  // 2. Bulk Upload State (File Drop + JSON/CSV Import)
   // ==========================================
   const [bulkDefaultPlacement, setBulkDefaultPlacement] = useState<string>('desktop:Gaming');
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
@@ -535,6 +598,27 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
   const [bulkNotice, setBulkNotice] = useState<string | null>(null);
   const [bulkNoticeType, setBulkNoticeType] = useState<'success' | 'error'>('success');
   const bulkFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Mode 2: Bulk JSON / CSV URL Import State
+  const [importFormat, setImportFormat] = useState<'json' | 'csv'>('json');
+  const [importRawText, setImportRawText] = useState<string>('');
+  const [importDefaultPlacement, setImportDefaultPlacement] = useState<string>('desktop:Space');
+  const [importPreview, setImportPreview] = useState<{
+    validWallpapers: Wallpaper[];
+    errors: BulkImportValidationError[];
+    totalRows: number;
+    parseError?: string;
+  } | null>(null);
+  const [importSubmitting, setImportSubmitting] = useState<boolean>(false);
+  const [importProgress, setImportProgress] = useState<{ processed: number; total: number } | null>(null);
+  const [importResultBanner, setImportResultBanner] = useState<{
+    type: 'success' | 'error';
+    message: string;
+    details?: string[];
+  } | null>(null);
+  const [showSqlHelper, setShowSqlHelper] = useState<boolean>(false);
+  const [sqlCopied, setSqlCopied] = useState<boolean>(false);
+  const importFileInputRef = useRef<HTMLInputElement>(null);
 
   // ==========================================
   // 3. Wallpaper Management State
@@ -549,6 +633,8 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
   const [editTags, setEditTags] = useState<string>('');
   const [editDescEn, setEditDescEn] = useState<string>('');
   const [editDescAr, setEditDescAr] = useState<string>('');
+  const [editPreviewUrl, setEditPreviewUrl] = useState<string>('');
+  const [editFullUrl, setEditFullUrl] = useState<string>('');
   const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [wallpaperToDeleteId, setWallpaperToDeleteId] = useState<string | null>(null);
@@ -1071,7 +1157,19 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
       return;
     }
 
+    if (file.size > MAX_DIRECT_UPLOAD_BYTES) {
+      setManualNotice({
+        type: 'error',
+        message:
+          lang === 'ar'
+            ? `حجم الملف (${(file.size / (1024 * 1024)).toFixed(1)} MB) يتجاوز حد الرفع المباشر 50MB. استخدم حقول روابط preview_url و full_url بالأسفل.`
+            : `File size (${(file.size / (1024 * 1024)).toFixed(1)} MB) exceeds the 50MB direct upload limit. Paste preview_url and full_url CDN links below instead.`,
+      });
+      return;
+    }
+
     setManualImageFile(file);
+    setManualFileSize(`${(file.size / (1024 * 1024)).toFixed(1)} MB`);
     const objectUrl = registerBlobUrl(URL.createObjectURL(file));
     setManualImagePreview(objectUrl);
 
@@ -1117,7 +1215,19 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
       return;
     }
 
+    if (file.size > MAX_DIRECT_UPLOAD_BYTES) {
+      setManualNotice({
+        type: 'error',
+        message:
+          lang === 'ar'
+            ? `حجم الفيديو (${(file.size / (1024 * 1024)).toFixed(1)} MB) يتجاوز حد الرفع المباشر 50MB. استخدم حقول روابط preview_url و full_url بالأسفل.`
+            : `Video size (${(file.size / (1024 * 1024)).toFixed(1)} MB) exceeds the 50MB direct upload limit. Paste preview_url and full_url CDN links below instead.`,
+      });
+      return;
+    }
+
     setManualVideoFile(file);
+    setManualFileSize(`${(file.size / (1024 * 1024)).toFixed(1)} MB`);
     const objectUrl = registerBlobUrl(URL.createObjectURL(file));
     setManualVideoPreview(objectUrl);
     setManualIsLive(true);
@@ -1219,17 +1329,44 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
   const handlePublishManualWallpaper = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!manualImageFile && !manualVideoFile) {
+    const trimmedPreviewUrl = manualPreviewUrl.trim();
+    const trimmedFullUrl = manualFullUrl.trim();
+    const hasUploadedFiles = Boolean(manualImageFile || manualVideoFile);
+    const hasExternalUrls = Boolean(trimmedFullUrl || trimmedPreviewUrl);
+
+    if (!hasUploadedFiles && !hasExternalUrls) {
       setManualNotice({
         type: 'error',
         message:
           manualDeviceFormat === 'mobile'
             ? (lang === 'ar'
-                ? 'يرجى رفع فيديو متحرك للهاتف بصيغة MP4/WEBM أو صورة غلاف رأسية لنشر الخلفية.'
-                : 'Please upload a mobile motion video (.mp4/.webm) or vertical cover image before publishing.')
+                ? 'يرجى رفع فيديو/صورة (أقل من 50MB) أو إدخال روابط preview_url و full_url قبل النشر.'
+                : 'Please upload media (<50MB) or enter preview_url / full_url links before publishing.')
             : (lang === 'ar'
-                ? 'يرجى رفع صورة ثابتة 4K أو فيديو متحرك واحد على الأقل لنشر الخلفية.'
-                : 'Please upload at least a 4K static image or a live video before publishing.'),
+                ? 'يرجى رفع صورة/فيديو (أقل من 50MB) أو إدخال رابط full_url و preview_url لنشر الخلفية.'
+                : 'Please upload media (<50MB) or enter preview_url / full_url links before publishing.'),
+      });
+      return;
+    }
+
+    if (trimmedPreviewUrl && !isValidHttpUrl(trimmedPreviewUrl)) {
+      setManualNotice({
+        type: 'error',
+        message:
+          lang === 'ar'
+            ? 'رابط preview_url غير صالح. يجب أن يبدأ بـ http:// أو https://.'
+            : 'Invalid preview_url. Please enter a valid http:// or https:// URL.',
+      });
+      return;
+    }
+
+    if (trimmedFullUrl && !isValidHttpUrl(trimmedFullUrl)) {
+      setManualNotice({
+        type: 'error',
+        message:
+          lang === 'ar'
+            ? 'رابط full_url غير صالح. يجب أن يبدأ بـ http:// أو https://.'
+            : 'Invalid full_url. Please enter a valid http:// or https:// URL.',
       });
       return;
     }
@@ -1260,10 +1397,14 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
     try {
       const wpId = generateWallpaperId();
       const isMobileFormat = manualDeviceFormat === 'mobile';
-      const isLive = Boolean(manualVideoFile || manualIsLive || isMobileFormat);
+      const externalFullIsVideo = isVideoUrl(trimmedFullUrl);
+      const externalPreviewIsVideo = isVideoUrl(trimmedPreviewUrl);
+      const isLive = Boolean(
+        manualVideoFile || manualIsLive || isMobileFormat || externalFullIsVideo || externalPreviewIsVideo
+      );
 
       // Parse tags
-      let parsedTags = manualTags
+      const parsedTags = manualTags
         .split(',')
         .map((t) => t.trim())
         .filter(Boolean);
@@ -1291,11 +1432,15 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
           ? 'خلفية هاتف حية رأسية فائقة السلاسة بمعدل 60 إطاراً في الثانية (9:16) مصممة لشاشات OLED ومعدلات التحديث العالية. مرخصة للاستخدام الشخصي المجاني.'
           : 'خلفية سطح مكتب أصلية فائقة الدقة 4K تم تحسينها هندسياً لشاشات OLED ومعدلات التحديث العالية. مرخصة للاستخدام الشخصي المجاني.');
 
-      const calculatedFileSize = manualVideoFile
-        ? `${(manualVideoFile.size / (1024 * 1024)).toFixed(1)} MB`
-        : manualImageFile
-        ? `${(manualImageFile.size / (1024 * 1024)).toFixed(1)} MB`
-        : '14.2 MB';
+      const calculatedFileSize =
+        manualFileSize.trim() ||
+        (manualVideoFile
+          ? `${(manualVideoFile.size / (1024 * 1024)).toFixed(1)} MB`
+          : manualImageFile
+          ? `${(manualImageFile.size / (1024 * 1024)).toFixed(1)} MB`
+          : isLive
+          ? '24.0 MB'
+          : '14.2 MB');
 
       const defaultWidth = isMobileFormat ? 2160 : 3840;
       const defaultHeight = isMobileFormat ? 3840 : 2160;
@@ -1303,6 +1448,9 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
       const height = manualImageDimensions?.height || defaultHeight;
       const finalAspectRatio = isMobileFormat ? '9:16' : (manualImageDimensions ? `${width}:${height}` : '16:9');
       const finalCategory = isMobileFormat && manualCategory === 'Journal' ? 'Mobile' : manualCategory;
+
+      const effectiveFullUrl = trimmedFullUrl || trimmedPreviewUrl || '';
+      const effectivePreviewUrl = trimmedPreviewUrl || trimmedFullUrl || '';
 
       const baseWallpaper: Wallpaper = {
         id: wpId,
@@ -1319,10 +1467,16 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
         resolution: manualResolution || `${width}×${height}`,
         width,
         height,
-        url: '',
-        videoUrl: undefined,
-        posterUrl: undefined,
-        thumbnailUrl: undefined,
+        url: effectiveFullUrl,
+        previewUrl: effectivePreviewUrl || undefined,
+        fullUrl: effectiveFullUrl || undefined,
+        videoUrl: externalFullIsVideo
+          ? trimmedFullUrl
+          : externalPreviewIsVideo
+          ? trimmedPreviewUrl
+          : undefined,
+        posterUrl: effectivePreviewUrl && !isVideoUrl(effectivePreviewUrl) ? effectivePreviewUrl : undefined,
+        thumbnailUrl: effectivePreviewUrl || undefined,
         formatType: isLive ? 'video' : 'image',
         aspectRatio: finalAspectRatio,
         deviceFormat: isMobileFormat ? 'mobile' : 'desktop',
@@ -1336,7 +1490,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
         isLive,
       };
 
-      // Strictly upload media to Supabase Storage "wallpapers" bucket & insert into public.wallpapers
+      // Strictly upload media (<50MB files) to Supabase Storage or insert dual-tier URLs into public.wallpapers
       const syncRes = await createWallpaperWithSync(baseWallpaper, {
         imageFile: manualImageFile,
         videoFile: manualVideoFile,
@@ -1366,14 +1520,17 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
       setManualTitleAr('');
       setManualDescEn('');
       setManualDescAr('');
+      setManualPreviewUrl('');
+      setManualFullUrl('');
+      setManualFileSize('');
       setManualTags(isMobileFormat ? 'Mobile Live Wallpapers, 9:16 Vertical, 60 FPS, OLED Black, Smartphone' : '4K Ultra HD, Desktop, OLED Black');
 
       setManualNotice({
         type: 'success',
         message:
           lang === 'ar'
-            ? `تم رفع وحفظ الخلفية "${titleAr}" بنجاح في Supabase (${isMobileFormat ? 'خلفيات الهاتف الحية' : 'خلفيات سطح المكتب'})!`
-            : `Wallpaper "${titleEn}" uploaded to Supabase Storage & saved to public.wallpapers (${isMobileFormat ? 'Mobile Live' : 'Desktop 4K'})!`,
+            ? `تم حفظ ونشر الخلفية "${titleAr}" بنجاح في Supabase (${isMobileFormat ? 'خلفيات الهاتف الحية' : 'خلفيات سطح المكتب'})!`
+            : `Wallpaper "${titleEn}" saved to Supabase public.wallpapers (${isMobileFormat ? 'Mobile Live' : 'Desktop 4K'})!`,
       });
 
       setTimeout(() => {
@@ -1386,8 +1543,8 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
         type: 'error',
         message:
           lang === 'ar'
-            ? `حدث خطأ أثناء الرفع إلى Supabase: ${err?.message || 'خطأ غير متوقع'}`
-            : `Supabase upload error: ${err?.message || 'Unexpected error'}`,
+            ? `حدث خطأ أثناء الحفظ في Supabase: ${err?.message || 'خطأ غير متوقع'}`
+            : `Supabase save error: ${err?.message || 'Unexpected error'}`,
       });
     } finally {
       setManualPublishing(false);
@@ -1411,7 +1568,21 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
   };
 
   const processBulkFiles = (files: File[]) => {
-    const valid = files.filter((f) => f.type.startsWith('image/') || f.type.startsWith('video/'));
+    const mediaFiles = files.filter((f) => f.type.startsWith('image/') || f.type.startsWith('video/'));
+    if (mediaFiles.length === 0) return;
+
+    const oversized = mediaFiles.filter((f) => f.size > MAX_DIRECT_UPLOAD_BYTES);
+    const valid = mediaFiles.filter((f) => f.size <= MAX_DIRECT_UPLOAD_BYTES);
+
+    if (oversized.length > 0) {
+      setBulkNoticeType('error');
+      setBulkNotice(
+        lang === 'ar'
+          ? `تم استبعاد ${oversized.length} ملف(ات) لأن حجمها يتجاوز 50MB. استخدم تبويب "استيراد جماعي (JSON / CSV)" لإضافة الروابط المباشرة.`
+          : `${oversized.length} file(s) skipped because they exceed the 50MB direct upload limit. Use "Bulk Import (JSON / CSV)" for large CDN assets.`
+      );
+    }
+
     if (valid.length === 0) return;
 
     const newItems: QueuedFile[] = [];
@@ -1455,6 +1626,131 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
     });
 
     setQueuedFiles((prev) => [...prev, ...newItems]);
+  };
+
+  // ==========================================
+  // Mode 2: Bulk Import JSON / CSV Handlers
+  // ==========================================
+  const handleValidateBulkImport = (textOverride?: string, formatOverride?: 'json' | 'csv') => {
+    const raw = textOverride !== undefined ? textOverride : importRawText;
+    const fmt = formatOverride || importFormat;
+    const defaultOpt =
+      TARGET_PLACEMENT_OPTIONS.find((o) => o.key === importDefaultPlacement) || TARGET_PLACEMENT_OPTIONS[3];
+
+    const parsed = parseBulkInputText(raw, fmt, {
+      defaultCategory: defaultOpt.category,
+      defaultDeviceFormat: defaultOpt.deviceFormat,
+      defaultIsLive: defaultOpt.deviceFormat === 'mobile',
+    });
+    setImportPreview(parsed);
+    setImportResultBanner(null);
+    return parsed;
+  };
+
+  const handleBulkImportFileUpload = async (file: File) => {
+    try {
+      const text = await file.text();
+      const lower = file.name.toLowerCase();
+      const detectedFormat: 'json' | 'csv' =
+        lower.endsWith('.csv') ? 'csv' : lower.endsWith('.json') ? 'json' : text.trim().startsWith('[') || text.trim().startsWith('{') ? 'json' : 'csv';
+      setImportFormat(detectedFormat);
+      setImportRawText(text);
+      handleValidateBulkImport(text, detectedFormat);
+    } catch (err: any) {
+      setImportResultBanner({
+        type: 'error',
+        message: err?.message || (lang === 'ar' ? 'تعذر قراءة الملف المحدد.' : 'Failed to read the selected file.'),
+      });
+    }
+  };
+
+  const handleExecuteBulkImport = async () => {
+    if (importSubmitting) return;
+
+    const parsed = importPreview || handleValidateBulkImport();
+    if (!parsed || parsed.parseError || parsed.validWallpapers.length === 0) {
+      setImportResultBanner({
+        type: 'error',
+        message:
+          parsed?.parseError ||
+          (lang === 'ar'
+            ? 'لا توجد سجلات صالحة للاستيراد. تأكد من صحة الروابط والمحتوى أولاً.'
+            : 'No valid records to import. Fix syntax or invalid URLs before saving.'),
+      });
+      return;
+    }
+
+    if (!supabaseStatus.configured) {
+      setImportResultBanner({
+        type: 'error',
+        message:
+          supabaseStatus.error ||
+          (lang === 'ar'
+            ? 'تعذر الاستيراد: متغيرات Supabase غير مضبوطة.'
+            : 'Import blocked: VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY is missing.'),
+      });
+      return;
+    }
+
+    setImportSubmitting(true);
+    setImportProgress({ processed: 0, total: parsed.validWallpapers.length });
+    setImportResultBanner(null);
+
+    try {
+      const res = await bulkImportWallpapersToSupabase(
+        parsed.validWallpapers,
+        50,
+        (processed, total) => {
+          setImportProgress({ processed, total });
+        }
+      );
+
+      if (res.importedWallpapers.length > 0) {
+        onAddWallpapers(res.importedWallpapers);
+        if (onRefreshFromCloud) {
+          Promise.resolve(onRefreshFromCloud()).catch(() => {});
+        }
+      }
+
+      const validationSkipped = parsed.errors.length;
+      const totalFailed = res.failedCount + validationSkipped;
+
+      if (res.importedCount > 0 && res.failedCount === 0) {
+        setImportResultBanner({
+          type: 'success',
+          message:
+            lang === 'ar'
+              ? `✅ تم استيراد ${res.importedCount} خلفية بنجاح إلى Supabase!${
+                  validationSkipped > 0 ? ` (تم تخطي ${validationSkipped} صف غير صالح)` : ''
+                }`
+              : `✅ Successfully imported ${res.importedCount} wallpaper(s) to Supabase!${
+                  validationSkipped > 0 ? ` (${validationSkipped} invalid row(s) skipped)` : ''
+                }`,
+        });
+        setImportRawText('');
+        setImportPreview(null);
+      } else {
+        setImportResultBanner({
+          type: res.importedCount > 0 ? 'success' : 'error',
+          message:
+            lang === 'ar'
+              ? `تم استيراد ${res.importedCount} من أصل ${parsed.totalRows} خلفية (${totalFailed} فشل/تخطي).`
+              : `Imported ${res.importedCount} of ${parsed.totalRows} wallpaper(s) (${totalFailed} failed/skipped).`,
+          details: res.errors.slice(0, 8),
+        });
+      }
+    } catch (err: any) {
+      setImportResultBanner({
+        type: 'error',
+        message:
+          lang === 'ar'
+            ? `فشل الاستيراد الجماعي: ${err?.message || 'خطأ غير متوقع'}`
+            : `Bulk import failed: ${err?.message || 'Unexpected error'}`,
+      });
+    } finally {
+      setImportSubmitting(false);
+      setImportProgress(null);
+    }
   };
 
   const handlePublishBulkBatch = async () => {
@@ -1773,12 +2069,35 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
     setEditTags((Array.isArray(wp.tags) ? wp.tags : []).join(', '));
     setEditDescEn(typeof wp.description === 'string' ? wp.description : wp.description?.en || '');
     setEditDescAr(typeof wp.description === 'string' ? wp.description : wp.description?.ar || '');
+    setEditPreviewUrl(wp.previewUrl || wp.thumbnailUrl || wp.posterUrl || '');
+    setEditFullUrl(wp.fullUrl || wp.videoUrl || wp.url || '');
     setEditError(null);
   };
 
   const handleSaveWallpaperEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingWallpaper || isSavingEdit) return;
+
+    const nextPreview = editPreviewUrl.trim();
+    const nextFull = editFullUrl.trim();
+
+    if (nextPreview && !isValidHttpUrl(nextPreview)) {
+      setEditError(
+        lang === 'ar'
+          ? 'رابط preview_url غير صالح. يجب أن يبدأ بـ http:// أو https://.'
+          : 'Invalid preview_url. Please enter a valid http/https URL.'
+      );
+      return;
+    }
+
+    if (nextFull && !isValidHttpUrl(nextFull)) {
+      setEditError(
+        lang === 'ar'
+          ? 'رابط full_url غير صالح. يجب أن يبدأ بـ http:// أو https://.'
+          : 'Invalid full_url. Please enter a valid http/https URL.'
+      );
+      return;
+    }
 
     if (!supabaseStatus.configured) {
       setEditError(
@@ -1799,6 +2118,9 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
         .map((t) => t.trim())
         .filter(Boolean);
 
+      const resolvedFull = nextFull || editingWallpaper.fullUrl || editingWallpaper.url;
+      const resolvedPreview = nextPreview || editingWallpaper.previewUrl || resolvedFull;
+
       const updated: Wallpaper = {
         ...editingWallpaper,
         title: {
@@ -1811,6 +2133,11 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
         },
         category: editCategory,
         resolution: editResolution,
+        previewUrl: resolvedPreview || undefined,
+        fullUrl: resolvedFull || undefined,
+        url: resolvedFull || editingWallpaper.url,
+        videoUrl: isVideoUrl(resolvedFull) ? resolvedFull : editingWallpaper.videoUrl,
+        thumbnailUrl: resolvedPreview || editingWallpaper.thumbnailUrl,
         tags: parsedTags.length > 0 ? parsedTags : (Array.isArray(editingWallpaper.tags) ? editingWallpaper.tags : []),
       };
 
@@ -2234,7 +2561,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
           <div className="flex-1 flex flex-col overflow-hidden">
             {/* Top Navigation Tabs */}
             <div className="flex items-center px-6 border-b border-[#202230] bg-[#0C0D12] gap-1 overflow-x-auto shrink-0">
-              {/* Tab 1: Manual 4K Upload (Primary) */}
+              {/* Tab 1: Manual 4K Upload (Mode 1) */}
               <button
                 onClick={() => setAdminTab('manual')}
                 className={`flex items-center gap-2 py-3.5 px-4 text-xs font-black border-b-2 transition-all shrink-0 cursor-pointer ${
@@ -2244,9 +2571,22 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                 }`}
               >
                 <Plus className="w-4 h-4 text-cyan-400" />
-                <span>{lang === 'ar' ? 'رفع يدوي مخصص (4K Upload)' : 'Manual 4K Upload Form'}</span>
-                <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-mono text-[9px]">
-                  NEW
+                <span>{lang === 'ar' ? 'إضافة خلفية (Mode 1)' : 'Single Add (Mode 1)'}</span>
+              </button>
+
+              {/* Tab 1B: Bulk Import JSON / CSV (Mode 2 - 4K Scale) */}
+              <button
+                onClick={() => setAdminTab('import')}
+                className={`flex items-center gap-2 py-3.5 px-4 text-xs font-black border-b-2 transition-all shrink-0 cursor-pointer ${
+                  adminTab === 'import'
+                    ? 'border-emerald-400 text-emerald-300 bg-emerald-500/10'
+                    : 'border-transparent text-neutral-400 hover:text-white'
+                }`}
+              >
+                <Database className="w-4 h-4 text-emerald-400" />
+                <span>{lang === 'ar' ? 'استيراد جماعي JSON / CSV (Mode 2)' : 'Bulk Import JSON / CSV (Mode 2)'}</span>
+                <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono text-[9px]">
+                  4K SCALE
                 </span>
               </button>
 
@@ -2900,6 +3240,80 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                       )}
                     </div>
 
+                    {/* Dual-Tier CDN URL Inputs (Recommended for 4K Animated Media / Files >= 50MB) */}
+                    <div className="p-5 rounded-2xl bg-[#14151E] border border-emerald-500/30 space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-[#222536]">
+                        <div className="flex items-center gap-2">
+                          <Link className="w-4 h-4 text-emerald-400" />
+                          <div>
+                            <div className="text-xs font-black text-white">
+                              {lang === 'ar'
+                                ? 'روابط الوسائط المباشرة (CDN / R2 / Bunny — مفضل للملفات الكبيرة)'
+                                : 'Dual-Tier External CDN URLs (Recommended for Large Animated Media)'}
+                            </div>
+                            <div className="text-[11px] text-neutral-400">
+                              {lang === 'ar'
+                                ? 'أدخل preview_url الخفيف للتصفح السريع و full_url الأصلي للتحميل المباشر (أو ارفع ملفات أقل من 50MB بالأعلى).'
+                                : 'Enter a lightweight preview_url for fast grid browsing and a full_url for direct download (or upload files <50MB above).'}
+                            </div>
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-bold">
+                          DUAL-TIER URL
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[11px] font-bold text-neutral-300 mb-1">
+                            {lang === 'ar' ? 'رابط المعاينة الخفيفة (preview_url)' : 'Lightweight Preview URL (preview_url)'}
+                          </label>
+                          <input
+                            type="url"
+                            placeholder="https://cdn.example.com/previews/wallpaper-preview.webp"
+                            value={manualPreviewUrl}
+                            onChange={(e) => setManualPreviewUrl(e.target.value)}
+                            className="w-full px-3.5 py-2.5 rounded-xl bg-[#090A0E] border border-[#2B2F42] text-white text-xs focus:outline-none focus:border-emerald-400 font-mono"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-bold text-neutral-300 mb-1">
+                            {lang === 'ar' ? 'رابط الجودة الأصلية الكاملة (full_url)' : 'Full-Quality Download URL (full_url)'}
+                          </label>
+                          <input
+                            type="url"
+                            placeholder="https://cdn.example.com/4k/wallpaper-original.mp4"
+                            value={manualFullUrl}
+                            onChange={(e) => setManualFullUrl(e.target.value)}
+                            className="w-full px-3.5 py-2.5 rounded-xl bg-[#090A0E] border border-[#2B2F42] text-white text-xs focus:outline-none focus:border-emerald-400 font-mono"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[11px] font-bold text-neutral-300 mb-1">
+                            {lang === 'ar' ? 'حجم الملف (file_size — اختياري)' : 'File Size Label (file_size — optional)'}
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. 28.4 MB"
+                            value={manualFileSize}
+                            onChange={(e) => setManualFileSize(e.target.value)}
+                            className="w-full px-3.5 py-2.5 rounded-xl bg-[#090A0E] border border-[#2B2F42] text-white text-xs focus:outline-none focus:border-cyan-500"
+                          />
+                        </div>
+                        <div className="flex items-end pb-1">
+                          <span className="text-[11px] text-neutral-400">
+                            {lang === 'ar'
+                              ? 'حد الرفع المباشر لملفات المتصفح: 50MB لكل ملف.'
+                              : 'Direct browser file upload limit: 50 MB max per file.'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
                     {/* Metadata Section: Titles, Category, Resolution, Tags, Descriptions */}
                     <div className="p-6 rounded-2xl bg-[#14151E] border border-[#232635] space-y-5">
                       <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-[#202230]">
@@ -3361,7 +3775,13 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                           {/* Card Preview Header */}
                           <div className="relative aspect-video rounded-xl overflow-hidden bg-black/60 border border-white/5">
                             <img
-                              src={wp.thumbnailUrl || wp.posterUrl || wp.url || getCategoryFallback(wp.category)}
+                              src={
+                                (!isVideoUrl(wp.previewUrl) ? wp.previewUrl : undefined) ||
+                                wp.thumbnailUrl ||
+                                wp.posterUrl ||
+                                (!isVideoUrl(wp.url) ? wp.url : undefined) ||
+                                getCategoryFallback(wp.category)
+                              }
                               alt={wp.title.en}
                               onError={(e) => {
                                 (e.target as HTMLImageElement).src = getCategoryFallback(wp.category);
@@ -3591,6 +4011,33 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                               onChange={(e) => setEditTags(e.target.value)}
                               className="w-full px-3.5 py-2 rounded-xl bg-[#090A0E] border border-[#2B2F42] text-white text-xs focus:outline-none focus:border-cyan-500"
                             />
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-[11px] font-bold text-neutral-400 mb-1">
+                                preview_url
+                              </label>
+                              <input
+                                type="url"
+                                value={editPreviewUrl}
+                                onChange={(e) => setEditPreviewUrl(e.target.value)}
+                                placeholder="https://..."
+                                className="w-full px-3 py-2 rounded-xl bg-[#090A0E] border border-[#2B2F42] text-white text-xs font-mono focus:outline-none focus:border-cyan-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-neutral-400 mb-1">
+                                full_url
+                              </label>
+                              <input
+                                type="url"
+                                value={editFullUrl}
+                                onChange={(e) => setEditFullUrl(e.target.value)}
+                                placeholder="https://..."
+                                className="w-full px-3 py-2 rounded-xl bg-[#090A0E] border border-[#2B2F42] text-white text-xs font-mono focus:outline-none focus:border-cyan-500"
+                              />
+                            </div>
                           </div>
 
                           <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#242738]">
@@ -3887,6 +4334,342 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                           </button>
                         );
                       })()}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ========================================================= */}
+              {/* TAB 1B / MODE 2: BULK IMPORT (JSON ARRAY OR CSV FILE)     */}
+              {/* ========================================================= */}
+              {adminTab === 'import' && (
+                <div className="max-w-5xl mx-auto space-y-6">
+                  {importResultBanner && (
+                    <div
+                      className={`p-4 rounded-2xl border text-xs space-y-2 ${
+                        importResultBanner.type === 'success'
+                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+                          : 'bg-red-500/10 border-red-500/30 text-red-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 font-bold">
+                          {importResultBanner.type === 'success' ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                          ) : (
+                            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                          )}
+                          <span>{importResultBanner.message}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setImportResultBanner(null)}
+                          className="opacity-70 hover:opacity-100 cursor-pointer"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                      {importResultBanner.details && importResultBanner.details.length > 0 && (
+                        <ul className="list-disc pl-5 space-y-1 text-[11px] text-red-300 font-mono">
+                          {importResultBanner.details.map((d, idx) => (
+                            <li key={idx}>{d}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Top Config & Format Switcher */}
+                  <div className="p-5 rounded-2xl bg-[#14151E] border border-emerald-500/30 space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-[#222536]">
+                      <div>
+                        <h3 className="text-sm font-black text-white flex items-center gap-2">
+                          <Database className="w-4 h-4 text-emerald-400" />
+                          <span>
+                            {lang === 'ar'
+                              ? 'الاستيراد الجماعي لآلاف الخلفيات (JSON / CSV)'
+                              : 'Bulk Import Wallpapers (JSON Array or CSV File)'}
+                          </span>
+                        </h3>
+                        <p className="text-[11px] text-neutral-400 mt-1">
+                          {lang === 'ar'
+                            ? 'أضف عشرات أو مئات الخلفيات دفعة واحدة مع التحقق التلقائي من صحة الروابط والحقول: title, title_ar, category, tags, preview_url, full_url.'
+                            : 'Import dozens or hundreds of wallpapers at once with automatic URL & schema validation for (title, title_ar, category, tags, preview_url, full_url).'}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowSqlHelper(!showSqlHelper)}
+                          className="px-3 py-1.5 rounded-xl bg-[#1B1E2C] hover:bg-[#23273A] border border-[#2E3348] text-cyan-300 text-[11px] font-bold cursor-pointer"
+                        >
+                          {lang === 'ar' ? 'سكربت SQL للجدول' : 'Supabase SQL Migration'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {showSqlHelper && (
+                      <div className="p-4 rounded-xl bg-[#090A0E] border border-cyan-500/30 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-cyan-300">
+                            Safe SQL Migration (ALTER TABLE public.wallpapers ADD COLUMN IF NOT EXISTS)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard?.writeText(SAFE_SQL_MIGRATION_SCRIPT);
+                              setSqlCopied(true);
+                              setTimeout(() => setSqlCopied(false), 2000);
+                            }}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/30 text-cyan-300 text-[11px] font-bold cursor-pointer"
+                          >
+                            {sqlCopied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                            <span>{sqlCopied ? 'Copied!' : 'Copy SQL'}</span>
+                          </button>
+                        </div>
+                        <pre className="text-[11px] font-mono text-neutral-300 overflow-x-auto whitespace-pre leading-relaxed">
+                          {SAFE_SQL_MIGRATION_SCRIPT}
+                        </pre>
+                      </div>
+                    )}
+
+                    {/* Controls Bar: Format Switch, Upload CSV/JSON File, Sample Template, Default Placement */}
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center p-1 bg-[#090A0E] rounded-xl border border-[#252838]">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setImportFormat('json');
+                            setImportPreview(null);
+                          }}
+                          className={`px-3.5 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                            importFormat === 'json'
+                              ? 'bg-emerald-500 text-black shadow-md'
+                              : 'text-neutral-400 hover:text-white'
+                          }`}
+                        >
+                          JSON Array
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setImportFormat('csv');
+                            setImportPreview(null);
+                          }}
+                          className={`px-3.5 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                            importFormat === 'csv'
+                              ? 'bg-emerald-500 text-black shadow-md'
+                              : 'text-neutral-400 hover:text-white'
+                          }`}
+                        >
+                          CSV File / Text
+                        </button>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => importFileInputRef.current?.click()}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#1A1D2B] hover:bg-[#23273A] border border-[#2D3248] text-white text-xs font-bold cursor-pointer"
+                        >
+                          <UploadCloud className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>{lang === 'ar' ? 'رفع ملف JSON أو CSV' : 'Upload .json / .csv File'}</span>
+                        </button>
+                        <input
+                          ref={importFileInputRef}
+                          type="file"
+                          accept=".json,.csv,.txt,application/json,text/csv"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) handleBulkImportFileUpload(f);
+                            e.target.value = '';
+                          }}
+                        />
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const sample = importFormat === 'json' ? SAMPLE_BULK_JSON : SAMPLE_BULK_CSV;
+                            setImportRawText(sample);
+                            handleValidateBulkImport(sample, importFormat);
+                          }}
+                          className="px-3 py-2 rounded-xl bg-[#1A1D2B] hover:bg-[#23273A] border border-[#2D3248] text-neutral-300 text-xs font-bold cursor-pointer"
+                        >
+                          {lang === 'ar' ? 'تحميل نموذج مثال' : `Load Sample ${importFormat.toUpperCase()}`}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Default Placement Fallback Selector */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-neutral-300 mb-1.5">
+                        {lang === 'ar'
+                          ? 'التصنيف الافتراضي (في حال عدم تحديد category في الصف)'
+                          : 'Fallback Target Placement (used if a row omits category)'}
+                      </label>
+                      <select
+                        value={importDefaultPlacement}
+                        onChange={(e) => setImportDefaultPlacement(e.target.value)}
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-[#090A0E] border border-[#2B2F42] text-white text-xs font-bold focus:outline-none focus:border-emerald-400 cursor-pointer"
+                      >
+                        {TARGET_PLACEMENT_OPTIONS.map((opt) => (
+                          <option key={opt.key} value={opt.key}>
+                            {lang === 'ar' ? opt.labelAr : opt.labelEn}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Paste JSON / CSV Textarea */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-neutral-300 mb-1.5">
+                        {importFormat === 'json'
+                          ? lang === 'ar'
+                            ? 'الصق مصفوفة JSON هنا'
+                            : 'Paste JSON Array ([{ "title": "...", "title_ar": "...", "category": "...", "tags": [...], "preview_url": "...", "full_url": "..." }])'
+                          : lang === 'ar'
+                          ? 'الصق بيانات CSV هنا (أو ارفع ملفاً من الأعلى)'
+                          : 'Paste CSV Content (Header: title,title_ar,category,tags,preview_url,full_url)'}
+                      </label>
+                      <textarea
+                        rows={10}
+                        dir="ltr"
+                        value={importRawText}
+                        onChange={(e) => {
+                          setImportRawText(e.target.value);
+                          setImportPreview(null);
+                        }}
+                        placeholder={importFormat === 'json' ? SAMPLE_BULK_JSON : SAMPLE_BULK_CSV}
+                        className="w-full p-4 rounded-xl bg-[#090A0E] border border-[#2B2F42] text-emerald-100 text-xs font-mono focus:outline-none focus:border-emerald-400"
+                      />
+                    </div>
+
+                    {/* Action Buttons Row */}
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => handleValidateBulkImport()}
+                        disabled={importSubmitting || !importRawText.trim()}
+                        className="px-5 py-3 rounded-xl bg-[#1D2030] hover:bg-[#272B40] border border-[#323854] text-white font-black text-xs cursor-pointer disabled:opacity-50"
+                      >
+                        {lang === 'ar' ? 'فحص ومعاينة البيانات والروابط' : 'Validate URLs & Preview Rows'}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleExecuteBulkImport}
+                        disabled={importSubmitting || !importRawText.trim()}
+                        className="flex-1 py-3 px-6 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-black font-black text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-emerald-500/20 disabled:opacity-50"
+                      >
+                        {importSubmitting ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <span>
+                              {importProgress
+                                ? lang === 'ar'
+                                  ? `جاري الاستيراد (${importProgress.processed} / ${importProgress.total})...`
+                                  : `Importing (${importProgress.processed} / ${importProgress.total})...`
+                                : lang === 'ar'
+                                ? 'جاري الاستيراد إلى Supabase...'
+                                : 'Importing to Supabase...'}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <UploadCloud className="w-4 h-4 stroke-[2.5]" />
+                            <span>
+                              {importPreview && importPreview.validWallpapers.length > 0
+                                ? lang === 'ar'
+                                  ? `استيراد ${importPreview.validWallpapers.length} خلفية صالحة إلى Supabase`
+                                  : `Import ${importPreview.validWallpapers.length} Valid Wallpaper(s) to Supabase`
+                                : lang === 'ar'
+                                ? 'بدء الاستيراد وحفظ السجلات في Supabase'
+                                : 'Validate & Import All to Supabase'}
+                            </span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Validation & Preview Output */}
+                  {importPreview && (
+                    <div className="p-5 rounded-2xl bg-[#14151E] border border-[#25293A] space-y-4">
+                      {importPreview.parseError ? (
+                        <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                          <span>{importPreview.parseError}</span>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="grid grid-cols-3 gap-3 text-center">
+                            <div className="p-3 rounded-xl bg-[#0D0E14] border border-[#222536]">
+                              <div className="text-[10px] text-neutral-400 uppercase font-bold">Total Rows</div>
+                              <div className="text-lg font-black text-white font-mono">{importPreview.totalRows}</div>
+                            </div>
+                            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
+                              <div className="text-[10px] text-emerald-300 uppercase font-bold">Valid & Ready</div>
+                              <div className="text-lg font-black text-emerald-400 font-mono">
+                                {importPreview.validWallpapers.length}
+                              </div>
+                            </div>
+                            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30">
+                              <div className="text-[10px] text-rose-300 uppercase font-bold">Invalid URLs / Skipped</div>
+                              <div className="text-lg font-black text-rose-400 font-mono">
+                                {importPreview.errors.length}
+                              </div>
+                            </div>
+                          </div>
+
+                          {importPreview.errors.length > 0 && (
+                            <div className="p-3.5 rounded-xl bg-rose-950/30 border border-rose-500/30 space-y-2 max-h-48 overflow-y-auto">
+                              <div className="text-xs font-bold text-rose-300">
+                                {lang === 'ar'
+                                  ? 'صفوف تحتوي على أخطاء (سيتم تخطيها تلقائياً):'
+                                  : 'Rows with URL or field validation errors (automatically skipped):'}
+                              </div>
+                              {importPreview.errors.map((errItem, idx) => (
+                                <div key={idx} className="text-[11px] font-mono text-rose-200">
+                                  Row #{errItem.rowNumber} ({errItem.title}): {errItem.reason}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {importPreview.validWallpapers.length > 0 && (
+                            <div className="space-y-2">
+                              <div className="text-xs font-bold text-neutral-300">
+                                {lang === 'ar'
+                                  ? `معاينة أول ${Math.min(6, importPreview.validWallpapers.length)} خلفيات جاهزة:`
+                                  : `Preview of first ${Math.min(6, importPreview.validWallpapers.length)} ready items:`}
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                {importPreview.validWallpapers.slice(0, 6).map((item) => (
+                                  <div
+                                    key={item.id}
+                                    className="p-3 rounded-xl bg-[#0D0E14] border border-[#232638] text-xs space-y-1"
+                                  >
+                                    <div className="font-bold text-white truncate">
+                                      {item.title.en} · {item.title.ar}
+                                    </div>
+                                    <div className="text-[10px] text-cyan-300 font-mono">
+                                      {item.category} · {item.deviceFormat === 'mobile' ? '9:16 Mobile' : '16:9 Desktop'} · {item.isLive ? 'LIVE' : 'STATIC'}
+                                    </div>
+                                    <div className="text-[10px] text-neutral-400 truncate font-mono">
+                                      preview: {item.previewUrl}
+                                    </div>
+                                    <div className="text-[10px] text-neutral-400 truncate font-mono">
+                                      full: {item.fullUrl}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
                   )}
                 </div>

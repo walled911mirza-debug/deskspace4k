@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Smartphone,
   ChevronDown,
@@ -18,6 +18,7 @@ import {
   Info,
   AlertTriangle,
   RotateCcw,
+  RefreshCw,
 } from 'lucide-react';
 import { Wallpaper, Language } from '../types';
 import { translations } from '../translations';
@@ -26,6 +27,11 @@ import { ErrorBoundary } from './ErrorBoundary';
 import { Pagination } from './Pagination';
 import { EmptyState } from './EmptyState';
 import { AdSenseUnit } from './AdSenseUnit';
+import { isSupabaseConfigured } from '../lib/supabase';
+import {
+  fetchWallpapersBatchFromSupabase,
+  WALLPAPERS_BATCH_SIZE,
+} from '../lib/wallpapersService';
 
 interface MobileLiveSectionProps {
   wallpapers: Wallpaper[];
@@ -55,10 +61,102 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
   const [resFilter, setResFilter] = useState<'all' | '4k' | 'fhd'>('all');
   const [topicFilter, setTopicFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState<string>('');
   const [sortBy, setSortBy] = useState<'popular' | 'latest' | 'favorites'>('popular');
   const [isGuideOpen, setIsGuideOpen] = useState(false);
 
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [itemsPerPage, setItemsPerPage] = useState<number>(WALLPAPERS_BATCH_SIZE);
+  const [mobileBatchItems, setMobileBatchItems] = useState<Wallpaper[]>([]);
+  const [mobileTotalCount, setMobileTotalCount] = useState<number>(0);
+  const [mobileHasMore, setMobileHasMore] = useState<boolean>(false);
+  const [mobileLoadedThroughPage, setMobileLoadedThroughPage] = useState<number>(1);
+  const [localLoading, setLocalLoading] = useState<boolean>(false);
+  const [loadingMore, setLoadingMore] = useState<boolean>(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const mobileGridTopRef = React.useRef<HTMLDivElement>(null);
+
   const t = translations[lang];
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  const loadMobileBatch = useCallback(
+    async (pageNum: number, append: boolean = false) => {
+      if (!isSupabaseConfigured) {
+        setMobileBatchItems([]);
+        setMobileTotalCount(0);
+        setMobileHasMore(false);
+        setLocalError(null);
+        return;
+      }
+
+      if (append) {
+        setLoadingMore(true);
+      } else {
+        setLocalLoading(true);
+      }
+      setLocalError(null);
+
+      try {
+        const res = await fetchWallpapersBatchFromSupabase({
+          page: pageNum,
+          limit: itemsPerPage || WALLPAPERS_BATCH_SIZE,
+          deviceFormat: 'mobile',
+          category: topicFilter === 'all' ? 'All' : topicFilter,
+          sortBy,
+          searchQuery: debouncedSearchQuery,
+        });
+
+        if (!res.configured) {
+          setMobileBatchItems([]);
+          setMobileTotalCount(0);
+          setMobileHasMore(false);
+          setLocalError(null);
+          return;
+        }
+
+        if (res.error) {
+          setLocalError(res.error);
+          return;
+        }
+
+        setMobileTotalCount(res.totalCount);
+        setMobileHasMore(res.hasMore);
+        setMobileLoadedThroughPage(pageNum);
+
+        if (append) {
+          setMobileBatchItems((prev) => {
+            const existingIds = new Set(prev.map((w) => w.id));
+            const uniqueNew = res.wallpapers.filter((w) => !existingIds.has(w.id));
+            return [...prev, ...uniqueNew];
+          });
+        } else {
+          setMobileBatchItems(res.wallpapers);
+        }
+      } catch (err: any) {
+        setLocalError(err?.message || 'Unable to fetch mobile wallpapers from Supabase.');
+      } finally {
+        setLocalLoading(false);
+        setLoadingMore(false);
+      }
+    },
+    [itemsPerPage, topicFilter, sortBy, debouncedSearchQuery]
+  );
+
+  // Fetch active batch when page, limit, topic, sort, or search changes
+  useEffect(() => {
+    loadMobileBatch(currentPage, false);
+  }, [loadMobileBatch, currentPage]);
+
+  const handleLoadMoreMobile = useCallback(() => {
+    if (loadingMore || localLoading || !mobileHasMore) return;
+    loadMobileBatch(mobileLoadedThroughPage + 1, true);
+  }, [loadingMore, localLoading, mobileHasMore, loadMobileBatch, mobileLoadedThroughPage]);
 
   // Topics available for mobile wallpapers
   const TOPICS = [
@@ -71,10 +169,20 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
     { id: 'Minimalist', label: t.categories.Minimalist },
   ];
 
+  // Combine session-added mobile items with server-fetched batch (or prop list when unconfigured)
+  const sourceWallpapers = useMemo(() => {
+    const propList = Array.isArray(wallpapers) ? wallpapers : [];
+    if (!isSupabaseConfigured) {
+      return propList;
+    }
+    const batchIds = new Set(mobileBatchItems.map((w) => w.id));
+    const extraSessionItems = propList.filter((w) => w && w.id && !batchIds.has(w.id));
+    return [...extraSessionItems, ...mobileBatchItems];
+  }, [wallpapers, mobileBatchItems]);
+
   // Filter & Sort Mobile Wallpapers
   const filteredWallpapers = useMemo(() => {
-    const safeList = Array.isArray(wallpapers) ? wallpapers : [];
-    let result = [...safeList];
+    let result = [...sourceWallpapers];
 
     // 1. Resolution filter
     if (resFilter === '4k') {
@@ -118,39 +226,46 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
       });
     }
 
-    // 4. Sort
-    result.sort((a, b) => {
-      if (sortBy === 'popular') return (Number(b.downloads) || 0) - (Number(a.downloads) || 0);
-      if (sortBy === 'favorites') return (Number(b.favorites) || 0) - (Number(a.favorites) || 0);
-      return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
-    });
+    // 4. Sort (client fallback when unconfigured)
+    if (!isSupabaseConfigured) {
+      result.sort((a, b) => {
+        if (sortBy === 'popular') return (Number(b.downloads) || 0) - (Number(a.downloads) || 0);
+        if (sortBy === 'favorites') return (Number(b.favorites) || 0) - (Number(a.favorites) || 0);
+        return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+      });
+    }
 
     return result;
-  }, [wallpapers, resFilter, topicFilter, searchQuery, sortBy]);
-
-  // Traditional High-Performance Pagination for Mobile Live Hub
-  const [currentPage, setCurrentPage] = useState<number>(1);
-  const [itemsPerPage, setItemsPerPage] = useState<number>(18);
-  const mobileGridTopRef = React.useRef<HTMLDivElement>(null);
+  }, [sourceWallpapers, resFilter, topicFilter, searchQuery, sortBy]);
 
   // Reset to page 1 whenever mobile filters change
-  React.useEffect(() => {
+  useEffect(() => {
     setCurrentPage(1);
-  }, [resFilter, topicFilter, searchQuery, sortBy]);
+  }, [resFilter, topicFilter, debouncedSearchQuery, sortBy]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredWallpapers.length / itemsPerPage));
+  const effectiveMobileTotal = isSupabaseConfigured
+    ? resFilter === 'all'
+      ? Math.max(mobileTotalCount, filteredWallpapers.length)
+      : filteredWallpapers.length
+    : filteredWallpapers.length;
+  const totalPages = Math.max(1, Math.ceil(effectiveMobileTotal / itemsPerPage));
 
-  React.useEffect(() => {
-    if (currentPage > totalPages && totalPages > 0) {
+  useEffect(() => {
+    if (!localLoading && currentPage > totalPages && totalPages > 0) {
       setCurrentPage(totalPages);
     }
-  }, [currentPage, totalPages]);
+  }, [localLoading, currentPage, totalPages]);
 
-  // Memory hygiene: render ONLY the active page's elements into the DOM
   const displayedWallpapers = useMemo(() => {
+    if (isSupabaseConfigured) {
+      return filteredWallpapers;
+    }
     const startIndex = (currentPage - 1) * itemsPerPage;
     return filteredWallpapers.slice(startIndex, startIndex + itemsPerPage);
   }, [filteredWallpapers, currentPage, itemsPerPage]);
+
+  const effectiveLoading = isSupabaseConfigured ? localLoading : isLoading;
+  const effectiveError = isSupabaseConfigured ? localError : error;
 
   const handleClearFilters = () => {
     setResFilter('all');
@@ -380,7 +495,7 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
         {/* Results summary bar */}
         <div className="flex items-center justify-between text-xs text-neutral-400 mt-4 mb-6">
           <div className="flex items-center gap-2">
-            <span className="font-bold text-white font-mono">{filteredWallpapers.length}</span>
+            <span className="font-bold text-white font-mono">{effectiveMobileTotal}</span>
             <span>{lang === 'ar' ? 'خلفية هاتف رأسية متوفرة' : 'mobile live wallpapers available'}</span>
             {searchQuery && (
               <span>
@@ -406,26 +521,27 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div ref={mobileGridTopRef} className="scroll-mt-28" />
 
-        {error && (
+        {effectiveError && (
           <div className="mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
               <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-              <span>{error}</span>
+              <span>{effectiveError}</span>
             </div>
-            {onRetry && (
-              <button
-                type="button"
-                onClick={onRetry}
-                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-bold text-xs cursor-pointer shrink-0"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>{lang === 'ar' ? 'إعادة المحاولة' : 'Retry'}</span>
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => {
+                if (isSupabaseConfigured) loadMobileBatch(currentPage, false);
+                else if (onRetry) onRetry();
+              }}
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-bold text-xs cursor-pointer shrink-0"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>{lang === 'ar' ? 'إعادة المحاولة' : 'Retry'}</span>
+            </button>
           </div>
         )}
 
-        {isLoading && wallpapers.length === 0 ? (
+        {effectiveLoading && displayedWallpapers.length === 0 ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 lg:gap-5">
             {Array.from({ length: 12 }).map((_, idx) => (
               <div
@@ -473,12 +589,40 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
           </ErrorBoundary>
         )}
 
+        {/* Load More Mobile Wallpapers (+24) */}
+        {isSupabaseConfigured && mobileHasMore && (
+          <div className="mt-8 flex justify-center">
+            <button
+              type="button"
+              onClick={handleLoadMoreMobile}
+              disabled={loadingMore}
+              className="inline-flex items-center justify-center gap-2.5 px-6 py-3 rounded-2xl bg-[#171326] hover:bg-[#221B3A] border border-fuchsia-500/40 hover:border-fuchsia-400 text-fuchsia-200 hover:text-white text-xs sm:text-sm font-black shadow-lg shadow-fuchsia-500/10 transition-all cursor-pointer disabled:opacity-60"
+            >
+              {loadingMore ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin text-fuchsia-400" />
+                  <span>{lang === 'ar' ? 'جاري تحميل الدفعة التالية...' : 'Loading next 24 mobile wallpapers...'}</span>
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="w-4 h-4 text-fuchsia-400" />
+                  <span>
+                    {lang === 'ar'
+                      ? `تحميل المزيد (+24) · المعروض ${displayedWallpapers.length} من ${effectiveMobileTotal}`
+                      : `Load More Mobile Wallpapers (+24) · ${displayedWallpapers.length} of ${effectiveMobileTotal}`}
+                  </span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
+
         {/* Traditional High-Performance Pagination */}
-        {filteredWallpapers.length > 0 && (
+        {effectiveMobileTotal > 0 && (
           <Pagination
             currentPage={currentPage}
             totalPages={totalPages}
-            totalItems={filteredWallpapers.length}
+            totalItems={effectiveMobileTotal}
             itemsPerPage={itemsPerPage}
             onPageChange={(page) => setCurrentPage(page)}
             onItemsPerPageChange={(limit) => {
@@ -486,7 +630,7 @@ export const MobileLiveSection: React.FC<MobileLiveSectionProps> = ({
               setCurrentPage(1);
             }}
             lang={lang}
-            itemsPerPageOptions={[12, 18, 24, 36]}
+            itemsPerPageOptions={[12, 24, 36]}
             variant="fuchsia"
             scrollTargetRef={mobileGridTopRef}
           />

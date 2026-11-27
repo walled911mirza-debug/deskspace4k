@@ -183,11 +183,27 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
 
   const [previewImgUrl, setPreviewImgUrl] = useState<string>(() => {
     if (!initialWallpaper) return '';
-    return initialWallpaper.posterUrl || initialWallpaper.thumbnailUrl || initialWallpaper.url || getCategoryFallback(initialWallpaper.category) || '';
+    const safePreview =
+      initialWallpaper.previewUrl && !isVideoUrl(initialWallpaper.previewUrl)
+        ? initialWallpaper.previewUrl
+        : '';
+    return (
+      safePreview ||
+      initialWallpaper.posterUrl ||
+      initialWallpaper.thumbnailUrl ||
+      (!isVideoUrl(initialWallpaper.url) ? initialWallpaper.url : '') ||
+      getCategoryFallback(initialWallpaper.category) ||
+      ''
+    );
   });
   const [resolvedVideoSource, setResolvedVideoSource] = useState<string>(() => {
     if (!initialWallpaper) return '';
-    return initialWallpaper.videoUrl || (isVideoUrl(initialWallpaper.url) ? initialWallpaper.url : '');
+    return (
+      (initialWallpaper.fullUrl && isVideoUrl(initialWallpaper.fullUrl) ? initialWallpaper.fullUrl : '') ||
+      initialWallpaper.videoUrl ||
+      (isVideoUrl(initialWallpaper.url) ? initialWallpaper.url : '') ||
+      (initialWallpaper.previewUrl && isVideoUrl(initialWallpaper.previewUrl) ? initialWallpaper.previewUrl : '')
+    );
   });
 
   useEffect(() => {
@@ -249,16 +265,30 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
       setNotFound(false);
 
       const isLive = Boolean(
-        targetWp.isLive &&
-          (targetWp.videoUrl ||
-            targetWp.formatType === 'video' ||
-            isVideoUrl(targetWp.url) ||
-            isVideoUrl(targetWp.videoUrl))
+        targetWp.isLive ||
+          targetWp.videoUrl ||
+          targetWp.formatType === 'video' ||
+          isVideoUrl(targetWp.fullUrl) ||
+          isVideoUrl(targetWp.previewUrl) ||
+          isVideoUrl(targetWp.url) ||
+          isVideoUrl(targetWp.videoUrl)
       );
 
       const rawTitleStr = targetWp.title?.[lang] || targetWp.title?.en || targetWp.title?.ar || '4K Wallpaper';
       const cleanTitleStr = cleanWallpaperTitle(rawTitleStr);
-      const rawTarget = targetWp.posterUrl || targetWp.thumbnailUrl || (isLive ? undefined : targetWp.url);
+      const rawPreviewTarget =
+        targetWp.previewUrl && !isVideoUrl(targetWp.previewUrl) ? targetWp.previewUrl : undefined;
+      const rawFallbackStill =
+        targetWp.fullUrl && !isVideoUrl(targetWp.fullUrl)
+          ? targetWp.fullUrl
+          : !isVideoUrl(targetWp.url)
+          ? targetWp.url
+          : undefined;
+      const rawTarget =
+        rawPreviewTarget ||
+        targetWp.posterUrl ||
+        targetWp.thumbnailUrl ||
+        (isLive ? undefined : rawFallbackStill);
       const initialPreview = getOptimizedPreviewUrl(rawTarget, 1920, targetWp.category);
       setPreviewImgUrl(initialPreview);
 
@@ -269,7 +299,12 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
         }
       }
 
-      const rawVid = targetWp.videoUrl || targetWp.url;
+      const rawVid =
+        (targetWp.fullUrl && isVideoUrl(targetWp.fullUrl) ? targetWp.fullUrl : undefined) ||
+        targetWp.videoUrl ||
+        (isVideoUrl(targetWp.url) ? targetWp.url : undefined) ||
+        (targetWp.previewUrl && isVideoUrl(targetWp.previewUrl) ? targetWp.previewUrl : undefined) ||
+        (isLive ? targetWp.fullUrl || targetWp.url : '');
       if (isLive && rawVid) {
         if (rawVid.startsWith('idb://') || rawVid.startsWith('blob:')) {
           const resolvedVid = await safeResolveMediaUrl(targetWp.id, rawVid, targetWp.category, cleanTitleStr);
@@ -380,11 +415,13 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
 
   // Determine media type
   const isLiveMedia = Boolean(
-    wallpaper?.isLive &&
-      (wallpaper.videoUrl ||
-        wallpaper.formatType === 'video' ||
-        isVideoUrl(wallpaper.url) ||
-        isVideoUrl(wallpaper.videoUrl))
+    wallpaper?.isLive ||
+      wallpaper?.videoUrl ||
+      wallpaper?.formatType === 'video' ||
+      isVideoUrl(wallpaper?.fullUrl) ||
+      isVideoUrl(wallpaper?.previewUrl) ||
+      isVideoUrl(wallpaper?.url) ||
+      isVideoUrl(wallpaper?.videoUrl)
   );
   const isVideo = isLiveMedia && !videoError;
   const videoSource = resolvedVideoSource;
@@ -510,25 +547,30 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
     }
   };
 
-  // 1. Motion Video Download Handler (High-resolution .mp4 / .webm)
+  // 1. Motion Video Download Handler (Original full_url .mp4 / .webm)
   const handleDownloadMotionVideo = async () => {
     if (!wallpaper || downloadingType) return;
     setDownloadingType('video');
     setDownloadSuccessType(null);
 
+    const directFullSource =
+      (wallpaper.fullUrl && isVideoUrl(wallpaper.fullUrl) ? wallpaper.fullUrl : '') ||
+      videoSource ||
+      wallpaper.videoUrl ||
+      wallpaper.fullUrl ||
+      wallpaper.url;
+
     try {
       const safeTitle = currentTitle.replace(/[^a-zA-Z0-9_\-\u0600-\u06FF]/g, '_').slice(0, 32) || 'Wallpaper';
 
-      if (videoSource && !videoSource.startsWith('data:image/')) {
-        // Genuine live motion video download (direct .mp4 or .webm)
+      if (directFullSource && !directFullSource.startsWith('data:image/')) {
         const baseFilename = `DeskSpace4K_${safeTitle}_LiveMotion`;
-        const ext = detectMediaExtension(videoSource, 'mp4');
-        await downloadDirectMediaFile(videoSource, baseFilename, ext);
+        const ext = detectMediaExtension(directFullSource, 'mp4');
+        await downloadDirectMediaFile(directFullSource, baseFilename, ext);
         onRecordDownload(wallpaper, '4K Live Motion Video (MP4)');
       } else if (wallpaper.isLive) {
-        // Procedural live motion wallpaper
         const baseFilename = `DeskSpace4K_${safeTitle}_LiveMotion`;
-        await downloadLiveMotionVideo(videoSource || wallpaper.url || previewImgUrl, wallpaper.category, baseFilename);
+        await downloadLiveMotionVideo(directFullSource || previewImgUrl, wallpaper.category, baseFilename);
         onRecordDownload(wallpaper, '4K Live Motion Video (MP4)');
       }
 
@@ -536,29 +578,42 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
       setTimeout(() => setDownloadSuccessType(null), 4500);
     } catch (err) {
       console.warn('Live video download error, using direct fallback:', err);
-      const targetExt = detectMediaExtension(videoSource, 'mp4');
+      const targetExt = detectMediaExtension(directFullSource, 'mp4');
       const safeTitle = currentTitle.replace(/[^a-zA-Z0-9_\-\u0600-\u06FF]/g, '_').slice(0, 32) || 'Wallpaper';
       const fallbackFilename = sanitizeFilename(`DeskSpace4K_${safeTitle}_LiveMotion`, targetExt);
-      fallbackDirectDownload(videoSource || wallpaper.videoUrl || wallpaper.url, fallbackFilename);
+      fallbackDirectDownload(directFullSource, fallbackFilename);
     } finally {
       setDownloadingType(null);
     }
   };
 
-  // 2. Still Photo Download Handler (3840×2160 or user-selected resolution)
+  // 2. Still Photo Download Handler (Original full_url for 4K Original, or canvas resize for other presets)
   const handleDownloadStillPhoto = async () => {
     if (!wallpaper || downloadingType) return;
     setDownloadingType('photo');
     setDownloadSuccessType(null);
 
+    const originalFullImage =
+      (wallpaper.fullUrl && !isVideoUrl(wallpaper.fullUrl) ? wallpaper.fullUrl : '') ||
+      (!isVideoUrl(wallpaper.url) ? wallpaper.url : '') ||
+      wallpaper.posterUrl ||
+      previewImgUrl;
+
     try {
       const safeTitle = currentTitle.replace(/[^a-zA-Z0-9_\-\u0600-\u06FF]/g, '_').slice(0, 32) || 'Wallpaper';
       const filename = `DeskSpace4K_${safeTitle}_${selectedRes.width}x${selectedRes.height}`;
 
-      // Pick pristine static image source
-      let photoSource = wallpaper.posterUrl || previewImgUrl;
+      if (selectedRes.id === '4k' && originalFullImage && !originalFullImage.includes('placeholder')) {
+        const ext = detectMediaExtension(originalFullImage, 'jpg');
+        await downloadDirectMediaFile(originalFullImage, filename, ext);
+        onRecordDownload(wallpaper, `${selectedRes.width}×${selectedRes.height} (Original)`);
+        setDownloadSuccessType('photo');
+        setTimeout(() => setDownloadSuccessType(null), 4500);
+        return;
+      }
 
-      // If poster is missing or a placeholder, try extracting a pristine frame from the live video element
+      let photoSource = originalFullImage;
+
       if (!photoSource || photoSource.includes('placeholder')) {
         if (videoRef.current && videoRef.current.videoWidth > 0) {
           try {
@@ -571,10 +626,10 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
               photoSource = canvas.toDataURL('image/jpeg', 0.95);
             }
           } catch {
-            photoSource = previewImgUrl || wallpaper.url;
+            photoSource = previewImgUrl || wallpaper.fullUrl || wallpaper.url;
           }
         } else {
-          photoSource = previewImgUrl || wallpaper.url;
+          photoSource = previewImgUrl || wallpaper.fullUrl || wallpaper.url;
         }
       }
 
@@ -593,7 +648,7 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
       console.warn('Still photo download error, using direct fallback:', err);
       const safeTitle = currentTitle.replace(/[^a-zA-Z0-9_\-\u0600-\u06FF]/g, '_').slice(0, 32) || 'Wallpaper';
       const fallbackFilename = sanitizeFilename(`DeskSpace4K_${safeTitle}_${selectedRes.width}x${selectedRes.height}`, 'jpg');
-      fallbackDirectDownload(wallpaper.posterUrl || previewImgUrl || wallpaper.url, fallbackFilename);
+      fallbackDirectDownload(originalFullImage || wallpaper.url, fallbackFilename);
     } finally {
       setDownloadingType(null);
     }
@@ -607,8 +662,12 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
     try {
       const safeTitle = currentTitle.replace(/[^a-zA-Z0-9_\-\u0600-\u06FF]/g, '_').slice(0, 32) || 'Wallpaper';
       const baseFilename = `DeskSpace4K_${safeTitle}`;
-      const videoSrc = videoSource || wallpaper.videoUrl || (isVideoUrl(wallpaper.url) ? wallpaper.url : null);
-      const mediaSource = videoSrc || wallpaper.posterUrl || previewImgUrl || wallpaper.url;
+      const videoSrc =
+        (wallpaper.fullUrl && isVideoUrl(wallpaper.fullUrl) ? wallpaper.fullUrl : '') ||
+        videoSource ||
+        wallpaper.videoUrl ||
+        (isVideoUrl(wallpaper.url) ? wallpaper.url : null);
+      const mediaSource = videoSrc || wallpaper.fullUrl || wallpaper.posterUrl || previewImgUrl || wallpaper.url;
 
       await downloadMobileLiveWallpaper(
         mediaSource,
@@ -909,7 +968,7 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
                 <video
                   ref={videoRef}
                   src={resolvedVideoSource}
-                  poster={wallpaper.posterUrl || undefined}
+                  poster={(previewImgUrl && !isVideoUrl(previewImgUrl) ? previewImgUrl : '') || wallpaper.posterUrl || undefined}
                   autoPlay
                   loop
                   muted={isMuted}
@@ -1512,7 +1571,10 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
               const relTitle = cleanWallpaperTitle(relRawTitle);
               const relRes = extractResolutionFromTitle(relRawTitle) || (rel.resolution ? rel.resolution.replace(/\s*[xX]\s*/g, '×').trim() : (isCurrentMobile ? '2160×3840' : '3840×2160'));
               const relThumb = getOptimizedPreviewUrl(
-                rel.posterUrl || rel.thumbnailUrl || (rel.isLive ? undefined : rel.url),
+                (rel.previewUrl && !isVideoUrl(rel.previewUrl) ? rel.previewUrl : undefined) ||
+                  rel.thumbnailUrl ||
+                  rel.posterUrl ||
+                  (rel.isLive ? undefined : rel.fullUrl || rel.url),
                 640,
                 rel.category
               );
@@ -1570,6 +1632,8 @@ export const WallpaperDetailsPage = React.memo(
   (prev, next) =>
     prev.wallpaper?.id === next.wallpaper?.id &&
     prev.wallpaper?.url === next.wallpaper?.url &&
+    prev.wallpaper?.previewUrl === next.wallpaper?.previewUrl &&
+    prev.wallpaper?.fullUrl === next.wallpaper?.fullUrl &&
     prev.wallpaper?.videoUrl === next.wallpaper?.videoUrl &&
     prev.wallpaper?.posterUrl === next.wallpaper?.posterUrl &&
     prev.wallpaper?.downloads === next.wallpaper?.downloads &&
