@@ -45,6 +45,8 @@ import {
   Zap,
   RefreshCw,
   Cloud,
+  SkipForward,
+  Gauge,
 } from 'lucide-react';
 import { Wallpaper, Category, Language, BlogPost } from '../types';
 import { translations } from '../translations';
@@ -88,8 +90,13 @@ import {
   parseBulkInputText,
   BulkImportValidationError,
 } from '../utils/bulkImportParser';
+import {
+  compressVideoForWallpaper,
+  VIDEO_COMPRESSION_THRESHOLD_BYTES,
+  formatBytesMB,
+} from '../utils/videoCompressor';
 
-const MAX_DIRECT_UPLOAD_BYTES = 50 * 1024 * 1024; // 50 MB direct storage upload cap
+const MAX_DIRECT_UPLOAD_BYTES = VIDEO_COMPRESSION_THRESHOLD_BYTES; // 50 MB direct storage upload cap
 
 const SAFE_SQL_MIGRATION_SCRIPT = `-- Safe, non-destructive migration to scale DeskSpace4K to 4,000+ animated wallpapers
 ALTER TABLE public.wallpapers
@@ -162,6 +169,15 @@ interface SecretAdminModalProps {
   cloudSyncError?: string | null;
 }
 
+type QueuedCompressionStatus =
+  | 'checking'
+  | 'queued_compression'
+  | 'compressing'
+  | 'compressed'
+  | 'ready'
+  | 'skipped'
+  | 'error';
+
 interface QueuedFile {
   id: string;
   file?: File;
@@ -173,6 +189,13 @@ interface QueuedFile {
   size: string;
   sourceType: 'file' | 'url';
   isVideo?: boolean;
+  originalSizeBytes: number;
+  compressedSizeBytes?: number;
+  compressionStatus: QueuedCompressionStatus;
+  compressionProgress: number;
+  compressionNote?: string;
+  compressionError?: string;
+  uploadState?: 'idle' | 'uploading' | 'done' | 'failed';
 }
 
 const CATEGORIES: Category[] = [
@@ -536,9 +559,17 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
     affectedCount?: number;
   }>>([]);
 
-  // Session memory hygiene: clean up all temporary object URLs and terminate background AI worker on unmount
+  // Session memory hygiene: clean up all temporary object URLs, abort active compressions, and terminate background AI worker on unmount
   useEffect(() => {
     return () => {
+      compressionAbortMapRef.current.forEach((ctrl) => {
+        try {
+          ctrl.abort();
+        } catch {
+          // ignore
+        }
+      });
+      compressionAbortMapRef.current.clear();
       drainAllTempBlobUrls();
       adminAiClient.terminate();
     };
@@ -595,9 +626,20 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
   const [globalTags, setGlobalTags] = useState<string>('4K Ultra HD, Desktop, High Res');
   const [globalIsLive, setGlobalIsLive] = useState<boolean>(true);
   const [bulkPublishing, setBulkPublishing] = useState<boolean>(false);
+  const [bulkUploadProgress, setBulkUploadProgress] = useState<{ current: number; total: number; currentName: string } | null>(null);
   const [bulkNotice, setBulkNotice] = useState<string | null>(null);
   const [bulkNoticeType, setBulkNoticeType] = useState<'success' | 'error'>('success');
   const bulkFileInputRef = useRef<HTMLInputElement>(null);
+
+  const queuedFilesRef = useRef<QueuedFile[]>([]);
+  const compressionAbortMapRef = useRef<Map<string, AbortController>>(new Map());
+  const skippedCompressionIdsRef = useRef<Set<string>>(new Set());
+  const cancelledQueueIdsRef = useRef<Set<string>>(new Set());
+  const compressionLoopRunningRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    queuedFilesRef.current = queuedFiles;
+  }, [queuedFiles]);
 
   // Mode 2: Bulk JSON / CSV URL Import State
   const [importFormat, setImportFormat] = useState<'json' | 'csv'>('json');
@@ -1567,32 +1609,332 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
     }
   };
 
+  const runSequentialCompressionQueue = async () => {
+    if (compressionLoopRunningRef.current) return;
+    compressionLoopRunningRef.current = true;
+
+    try {
+      while (true) {
+        const nextItem = queuedFilesRef.current.find(
+          (q) =>
+            q.compressionStatus === 'queued_compression' &&
+            !skippedCompressionIdsRef.current.has(q.id) &&
+            !cancelledQueueIdsRef.current.has(q.id)
+        );
+
+        if (!nextItem) break;
+
+        const targetId = nextItem.id;
+        const sourceFile = nextItem.file;
+        if (!sourceFile) {
+          setQueuedFiles((prev) =>
+            prev.map((q) =>
+              q.id === targetId
+                ? { ...q, compressionStatus: 'error', compressionError: 'Missing source file' }
+                : q
+            )
+          );
+          continue;
+        }
+
+        const controller = new AbortController();
+        compressionAbortMapRef.current.set(targetId, controller);
+
+        setQueuedFiles((prev) =>
+          prev.map((q) =>
+            q.id === targetId
+              ? {
+                  ...q,
+                  compressionStatus: 'compressing',
+                  compressionProgress: 1,
+                  compressionError: undefined,
+                }
+              : q
+          )
+        );
+
+        let lastReportedPct = 0;
+
+        try {
+          const result = await compressVideoForWallpaper(sourceFile, {
+            maxSizeBytes: VIDEO_COMPRESSION_THRESHOLD_BYTES,
+            maxDimension: 1920,
+            signal: controller.signal,
+            onProgress: ({ percent }) => {
+              if (
+                cancelledQueueIdsRef.current.has(targetId) ||
+                skippedCompressionIdsRef.current.has(targetId)
+              ) {
+                return;
+              }
+              if (percent === 100 || percent - lastReportedPct >= 2) {
+                lastReportedPct = percent;
+                setQueuedFiles((prev) =>
+                  prev.map((q) =>
+                    q.id === targetId && q.compressionStatus === 'compressing'
+                      ? { ...q, compressionProgress: percent }
+                      : q
+                  )
+                );
+              }
+            },
+          });
+
+          if (
+            cancelledQueueIdsRef.current.has(targetId) ||
+            skippedCompressionIdsRef.current.has(targetId)
+          ) {
+            continue;
+          }
+
+          let nextPoster = nextItem.posterUrl;
+          if (!nextPoster) {
+            nextPoster = await extractVideoPoster(result.file);
+          }
+
+          const newPreviewUrl = registerBlobUrl(URL.createObjectURL(result.file));
+          if (nextItem.previewUrl && nextItem.previewUrl.startsWith('blob:')) {
+            revokeBlobUrl(nextItem.previewUrl);
+          }
+
+          const compressedSizeLabel = formatBytesMB(result.compressedSizeBytes);
+          const origSizeLabel = formatBytesMB(result.originalSizeBytes);
+
+          setQueuedFiles((prev) =>
+            prev.map((q) => {
+              if (q.id !== targetId) return q;
+              return {
+                ...q,
+                file: result.file,
+                previewUrl: newPreviewUrl,
+                posterUrl: nextPoster || q.posterUrl,
+                thumbnailUrl: nextPoster || q.thumbnailUrl,
+                size: compressedSizeLabel,
+                compressedSizeBytes: result.compressedSizeBytes,
+                compressionStatus: result.wasCompressed ? 'compressed' : 'ready',
+                compressionProgress: 100,
+                compressionError: undefined,
+                compressionNote: result.wasCompressed
+                  ? `${origSizeLabel} → ${compressedSizeLabel} (-${result.compressionRatioPercent}%)`
+                  : `${compressedSizeLabel} · Ready`,
+              };
+            })
+          );
+        } catch (err: any) {
+          if (err?.name === 'AbortError' || controller.signal.aborted) {
+            // Skip or Cancel handler already updated state
+          } else {
+            setQueuedFiles((prev) =>
+              prev.map((q) =>
+                q.id === targetId
+                  ? {
+                      ...q,
+                      compressionStatus: 'error',
+                      compressionProgress: 0,
+                      compressionError:
+                        err?.message ||
+                        (lang === 'ar' ? 'فشل ضغط الفيديو.' : 'Video compression failed.'),
+                    }
+                  : q
+              )
+            );
+          }
+        } finally {
+          compressionAbortMapRef.current.delete(targetId);
+        }
+
+        // Yield briefly to keep UI animations & scroll completely responsive
+        await new Promise((r) => setTimeout(r, 60));
+      }
+    } finally {
+      compressionLoopRunningRef.current = false;
+      // Re-check if new queued items arrived right as the loop exited
+      const hasMorePending = queuedFilesRef.current.some(
+        (q) =>
+          q.compressionStatus === 'queued_compression' &&
+          !skippedCompressionIdsRef.current.has(q.id) &&
+          !cancelledQueueIdsRef.current.has(q.id)
+      );
+      if (hasMorePending) {
+        void runSequentialCompressionQueue();
+      }
+    }
+  };
+
+  const handleSkipCompressionForItem = (id: string) => {
+    skippedCompressionIdsRef.current.add(id);
+    const activeCtrl = compressionAbortMapRef.current.get(id);
+    if (activeCtrl) {
+      try {
+        activeCtrl.abort();
+      } catch {
+        // ignore
+      }
+      compressionAbortMapRef.current.delete(id);
+    }
+
+    setQueuedFiles((prev) =>
+      prev.map((q) =>
+        q.id === id
+          ? {
+              ...q,
+              compressionStatus: 'skipped',
+              compressionProgress: 100,
+              compressionError: undefined,
+              compressionNote:
+                lang === 'ar'
+                  ? `تم تخطي الضغط · الملف الأصلي (${formatBytesMB(q.originalSizeBytes)})`
+                  : `Compression skipped · Original (${formatBytesMB(q.originalSizeBytes)})`,
+            }
+          : q
+      )
+    );
+  };
+
+  const handleSkipAllCompression = () => {
+    queuedFilesRef.current.forEach((q) => {
+      if (
+        q.compressionStatus === 'checking' ||
+        q.compressionStatus === 'queued_compression' ||
+        q.compressionStatus === 'compressing'
+      ) {
+        skippedCompressionIdsRef.current.add(q.id);
+        const ctrl = compressionAbortMapRef.current.get(q.id);
+        if (ctrl) {
+          try {
+            ctrl.abort();
+          } catch {
+            // ignore
+          }
+          compressionAbortMapRef.current.delete(q.id);
+        }
+      }
+    });
+
+    setQueuedFiles((prev) =>
+      prev.map((q) =>
+        q.compressionStatus === 'checking' ||
+        q.compressionStatus === 'queued_compression' ||
+        q.compressionStatus === 'compressing'
+          ? {
+              ...q,
+              compressionStatus: 'skipped',
+              compressionProgress: 100,
+              compressionError: undefined,
+              compressionNote:
+                lang === 'ar'
+                  ? `تم تخطي الضغط · (${formatBytesMB(q.originalSizeBytes)})`
+                  : `Skipped · Original (${formatBytesMB(q.originalSizeBytes)})`,
+            }
+          : q
+      )
+    );
+  };
+
+  const handleCancelQueuedItem = (id: string) => {
+    cancelledQueueIdsRef.current.add(id);
+    const activeCtrl = compressionAbortMapRef.current.get(id);
+    if (activeCtrl) {
+      try {
+        activeCtrl.abort();
+      } catch {
+        // ignore
+      }
+      compressionAbortMapRef.current.delete(id);
+    }
+
+    setQueuedFiles((prev) => {
+      const target = prev.find((q) => q.id === id);
+      if (target?.previewUrl?.startsWith('blob:')) {
+        revokeBlobUrl(target.previewUrl);
+      }
+      return prev.filter((q) => q.id !== id);
+    });
+  };
+
+  const handleRetryCompressionForItem = (id: string) => {
+    skippedCompressionIdsRef.current.delete(id);
+    cancelledQueueIdsRef.current.delete(id);
+    setQueuedFiles((prev) =>
+      prev.map((q) =>
+        q.id === id
+          ? {
+              ...q,
+              compressionStatus: 'queued_compression',
+              compressionProgress: 0,
+              compressionError: undefined,
+              compressionNote:
+                lang === 'ar' ? 'في انتظار إعادة الضغط...' : 'Queued for compression...',
+            }
+          : q
+      )
+    );
+    setTimeout(() => {
+      void runSequentialCompressionQueue();
+    }, 30);
+  };
+
+  const handleClearBulkQueue = () => {
+    queuedFilesRef.current.forEach((q) => {
+      cancelledQueueIdsRef.current.add(q.id);
+      if (q.previewUrl?.startsWith('blob:')) {
+        revokeBlobUrl(q.previewUrl);
+      }
+    });
+    compressionAbortMapRef.current.forEach((ctrl) => {
+      try {
+        ctrl.abort();
+      } catch {
+        // ignore
+      }
+    });
+    compressionAbortMapRef.current.clear();
+    setQueuedFiles([]);
+    setBulkUploadProgress(null);
+  };
+
   const processBulkFiles = (files: File[]) => {
-    const mediaFiles = files.filter((f) => f.type.startsWith('image/') || f.type.startsWith('video/'));
+    const mediaFiles = files.filter(
+      (f) =>
+        f.type.startsWith('image/') ||
+        f.type.startsWith('video/') ||
+        /\.(mp4|webm|mov|mkv|m4v|jpg|jpeg|png|webp)$/i.test(f.name)
+    );
     if (mediaFiles.length === 0) return;
 
-    const oversized = mediaFiles.filter((f) => f.size > MAX_DIRECT_UPLOAD_BYTES);
-    const valid = mediaFiles.filter((f) => f.size <= MAX_DIRECT_UPLOAD_BYTES);
+    // Static images cannot use video compression — only reject non-video images > 50 MB
+    const oversizedImages = mediaFiles.filter(
+      (f) => !(f.type.startsWith('video/') || /\.(mp4|webm|mov|mkv|m4v)$/i.test(f.name)) && f.size > MAX_DIRECT_UPLOAD_BYTES
+    );
+    const acceptedFiles = mediaFiles.filter(
+      (f) => f.type.startsWith('video/') || /\.(mp4|webm|mov|mkv|m4v)$/i.test(f.name) || f.size <= MAX_DIRECT_UPLOAD_BYTES
+    );
 
-    if (oversized.length > 0) {
+    if (oversizedImages.length > 0) {
       setBulkNoticeType('error');
       setBulkNotice(
         lang === 'ar'
-          ? `تم استبعاد ${oversized.length} ملف(ات) لأن حجمها يتجاوز 50MB. استخدم تبويب "استيراد جماعي (JSON / CSV)" لإضافة الروابط المباشرة.`
-          : `${oversized.length} file(s) skipped because they exceed the 50MB direct upload limit. Use "Bulk Import (JSON / CSV)" for large CDN assets.`
+          ? `تم استبعاد ${oversizedImages.length} صورة لأن حجمها يتجاوز 50MB. يتم ضغط ملفات الفيديو تلقائياً فقط.`
+          : `${oversizedImages.length} static image(s) skipped because they exceed 50MB. Automatic compression applies to animated video wallpapers.`
       );
     }
 
-    if (valid.length === 0) return;
+    if (acceptedFiles.length === 0) return;
 
     const newItems: QueuedFile[] = [];
+    let hasVideosNeedingCompression = false;
 
-    valid.forEach((file) => {
-      const isVideo = file.type.startsWith('video/') || /\.(mp4|webm|mov|mkv)$/i.test(file.name);
+    acceptedFiles.forEach((file) => {
+      const isVideo = file.type.startsWith('video/') || /\.(mp4|webm|mov|mkv|m4v)$/i.test(file.name);
       const qId = generateWallpaperId();
       const previewUrl = registerBlobUrl(URL.createObjectURL(file));
       const name = cleanWallpaperTitle(file.name);
-      const size = `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+      const size = formatBytesMB(file.size);
+      const needsCompression = isVideo && file.size > VIDEO_COMPRESSION_THRESHOLD_BYTES;
+
+      if (needsCompression) {
+        hasVideosNeedingCompression = true;
+      }
 
       const item: QueuedFile = {
         id: qId,
@@ -1603,9 +1945,16 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
         size,
         sourceType: 'file',
         isVideo,
+        originalSizeBytes: file.size,
+        compressionStatus: 'checking',
+        compressionProgress: needsCompression ? 0 : 100,
+        compressionNote:
+          lang === 'ar' ? 'جاري فحص حجم الملف...' : 'Checking file size...',
+        uploadState: 'idle',
       };
       newItems.push(item);
 
+      // Extract lightweight poster/thumbnail immediately without blocking UI
       if (isVideo) {
         extractVideoPoster(file).then((poster) => {
           if (poster) {
@@ -1626,6 +1975,48 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
     });
 
     setQueuedFiles((prev) => [...prev, ...newItems]);
+
+    // Step 1 -> Step 2 transition: check each file size and either route straight to upload-ready or queue compression
+    setTimeout(() => {
+      setQueuedFiles((prev) =>
+        prev.map((q) => {
+          const match = newItems.find((n) => n.id === q.id);
+          if (!match || q.compressionStatus !== 'checking') return q;
+          if (skippedCompressionIdsRef.current.has(q.id)) return q;
+
+          const needsCompression =
+            Boolean(q.isVideo) && q.originalSizeBytes > VIDEO_COMPRESSION_THRESHOLD_BYTES;
+
+          if (needsCompression) {
+            return {
+              ...q,
+              compressionStatus: 'queued_compression',
+              compressionProgress: 0,
+              compressionNote:
+                lang === 'ar'
+                  ? `الحجم ${formatBytesMB(q.originalSizeBytes)} > 50MB · في انتظار الضغط`
+                  : `${formatBytesMB(q.originalSizeBytes)} > 50MB · Queued for compression`,
+            };
+          }
+
+          return {
+            ...q,
+            compressionStatus: 'ready',
+            compressionProgress: 100,
+            compressionNote:
+              lang === 'ar'
+                ? `${formatBytesMB(q.originalSizeBytes)} ≤ 50MB · جاهز للرفع المباشر`
+                : `${formatBytesMB(q.originalSizeBytes)} ≤ 50MB · Ready (no compression needed)`,
+          };
+        })
+      );
+
+      if (hasVideosNeedingCompression) {
+        setTimeout(() => {
+          void runSequentialCompressionQueue();
+        }, 40);
+      }
+    }, 120);
   };
 
   // ==========================================
@@ -1756,6 +2147,33 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
   const handlePublishBulkBatch = async () => {
     if (queuedFiles.length === 0 || bulkPublishing) return;
 
+    const busyItems = queuedFiles.filter(
+      (q) =>
+        q.compressionStatus === 'checking' ||
+        q.compressionStatus === 'queued_compression' ||
+        q.compressionStatus === 'compressing'
+    );
+    if (busyItems.length > 0) {
+      setBulkNoticeType('error');
+      setBulkNotice(
+        lang === 'ar'
+          ? `يوجد ${busyItems.length} ملف(ات) قيد الفحص أو الضغط حالياً. انتظر الاكتمال أو اضغط "تخطي الضغط".`
+          : `${busyItems.length} file(s) are still checking or compressing. Please wait or click "Skip Compression".`
+      );
+      return;
+    }
+
+    const readyQueue = queuedFiles.filter((q) => q.compressionStatus !== 'error');
+    if (readyQueue.length === 0) {
+      setBulkNoticeType('error');
+      setBulkNotice(
+        lang === 'ar'
+          ? 'لا توجد ملفات جاهزة للرفع. أعد المحاولة أو تخطَّ الضغط أو أزل الملفات المعطوبة.'
+          : 'No ready files to upload. Retry, skip compression, or remove failed items.'
+      );
+      return;
+    }
+
     if (!supabaseStatus.configured) {
       setBulkNoticeType('error');
       setBulkNotice(
@@ -1769,6 +2187,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
 
     setBulkPublishing(true);
     setBulkNotice(null);
+    setBulkUploadProgress({ current: 0, total: readyQueue.length, currentName: readyQueue[0]?.name || '' });
 
     try {
       const parsedTags = globalTags
@@ -1789,8 +2208,13 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
       let failedCount = 0;
       let firstSyncError: string | null = null;
 
-      for (let index = 0; index < queuedFiles.length; index++) {
-        const item = queuedFiles[index];
+      for (let index = 0; index < readyQueue.length; index++) {
+        const item = readyQueue[index];
+        setBulkUploadProgress({ current: index + 1, total: readyQueue.length, currentName: item.name });
+        setQueuedFiles((prev) =>
+          prev.map((q) => (q.id === item.id ? { ...q, uploadState: 'uploading' } : q))
+        );
+
         const cleanName = cleanWallpaperTitle(item.name || item.file?.name || '');
         const detectedRes = extractResolutionFromTitle(item.file?.name || item.name || '') || batchResolution;
         const isLiveItem = Boolean(item.isVideo || isMobileBatch || globalIsLive);
@@ -1801,6 +2225,12 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
         const defaultTags = isMobileBatch
           ? ['Mobile Live Wallpapers', '9:16 Vertical', batchCategory, '60 FPS']
           : ['4K Ultra HD', 'Desktop', batchCategory];
+
+        // Guarantee poster extraction if it hasn't resolved yet (ensures image_url/poster_url never break)
+        let resolvedPosterDataUrl = item.posterUrl;
+        if (item.isVideo && !resolvedPosterDataUrl && item.file) {
+          resolvedPosterDataUrl = await extractVideoPoster(item.file);
+        }
 
         const baseWallpaper: Wallpaper = {
           id: wpId,
@@ -1838,15 +2268,21 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
         const res = await createWallpaperWithSync(baseWallpaper, {
           imageFile: !item.isVideo ? item.file : undefined,
           videoFile: item.isVideo ? item.file : undefined,
-          posterDataUrl: item.posterUrl,
-          thumbnailDataUrl: item.thumbnailUrl,
+          posterDataUrl: resolvedPosterDataUrl,
+          thumbnailDataUrl: item.thumbnailUrl || resolvedPosterDataUrl,
         });
 
         if (res.syncedToSupabase && !res.error) {
           publishedWallpapers.push(res.wallpaper);
           succeededIds.add(item.id);
+          setQueuedFiles((prev) =>
+            prev.map((q) => (q.id === item.id ? { ...q, uploadState: 'done' } : q))
+          );
         } else {
           failedCount++;
+          setQueuedFiles((prev) =>
+            prev.map((q) => (q.id === item.id ? { ...q, uploadState: 'failed' } : q))
+          );
           if (!firstSyncError) {
             firstSyncError = res.error || 'Supabase upload/insert failed.';
           }
@@ -1866,7 +2302,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
             : `${failedCount} file(s) failed to upload to Supabase (${publishedWallpapers.length} succeeded). Error: ${firstSyncError}`
         );
       } else {
-        setQueuedFiles([]);
+        setQueuedFiles((prev) => prev.filter((q) => !succeededIds.has(q.id)));
         setBulkNoticeType('success');
         setBulkNotice(
           lang === 'ar'
@@ -1875,7 +2311,9 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
         );
         setTimeout(() => {
           setBulkNotice(null);
-          setAdminTab('manage');
+          if (queuedFilesRef.current.length === 0) {
+            setAdminTab('manage');
+          }
         }, 2000);
       }
     } catch (err: any) {
@@ -1888,6 +2326,7 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
       );
     } finally {
       setBulkPublishing(false);
+      setBulkUploadProgress(null);
     }
   };
 
@@ -4236,7 +4675,9 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                         {lang === 'ar' ? 'اسحب مجموعة ملفات دفعة واحدة هنا' : 'Drop multiple 4K files here for batch upload'}
                       </div>
                       <div className="text-xs text-neutral-400 mt-1">
-                        Supports bulk JPG, PNG, WEBP images and MP4, WEBM live motion videos
+                        {lang === 'ar'
+                          ? 'يدعم الصور (JPG, PNG, WEBP) والفيديوهات المتحركة (MP4, WEBM) — يتم ضغط الفيديوهات الأكبر من 50MB تلقائياً بجودة عالية'
+                          : 'Supports JPG, PNG, WEBP images and MP4, WEBM live videos · Videos > 50 MB are auto-compressed cleanly before upload'}
                       </div>
                     </div>
                     <input
@@ -4249,93 +4690,323 @@ export const SecretAdminModal: React.FC<SecretAdminModalProps> = ({
                     />
                   </div>
 
-                  {queuedFiles.length > 0 && (
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <h4 className="text-xs font-black text-white">
-                          Queued Media Files ({queuedFiles.length})
-                        </h4>
-                        <button
-                          type="button"
-                          onClick={() => setQueuedFiles([])}
-                          className="text-xs text-red-400 hover:underline"
-                        >
-                          Clear Queue
-                        </button>
-                      </div>
+                  {queuedFiles.length > 0 && (() => {
+                    const bulkOpt = TARGET_PLACEMENT_OPTIONS.find((o) => o.key === bulkDefaultPlacement) || TARGET_PLACEMENT_OPTIONS[0];
+                    const busyFiles = queuedFiles.filter(
+                      (q) =>
+                        q.compressionStatus === 'checking' ||
+                        q.compressionStatus === 'queued_compression' ||
+                        q.compressionStatus === 'compressing'
+                    );
+                    const compressingFile = queuedFiles.find((q) => q.compressionStatus === 'compressing');
+                    const compressedCount = queuedFiles.filter((q) => q.compressionStatus === 'compressed').length;
+                    const errorCount = queuedFiles.filter((q) => q.compressionStatus === 'error').length;
+                    const readyCount = queuedFiles.length - busyFiles.length - errorCount;
 
-                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                        {queuedFiles.map((q) => {
-                          const bulkOpt = TARGET_PLACEMENT_OPTIONS.find((o) => o.key === bulkDefaultPlacement) || TARGET_PLACEMENT_OPTIONS[0];
-                          return (
-                            <div
-                              key={q.id}
-                              className="p-2.5 rounded-xl bg-[#14151E] border border-[#242738] relative group"
+                    const totalSavedBytes = queuedFiles.reduce((acc, q) => {
+                      if (q.compressionStatus === 'compressed' && q.compressedSizeBytes && q.originalSizeBytes > q.compressedSizeBytes) {
+                        return acc + (q.originalSizeBytes - q.compressedSizeBytes);
+                      }
+                      return acc;
+                    }, 0);
+
+                    return (
+                      <div className="space-y-4">
+                        {/* Queue Toolbar + Compression Summary */}
+                        <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-2xl bg-[#14151E] border border-[#242738]">
+                          <div className="flex flex-wrap items-center gap-2.5">
+                            <h4 className="text-xs font-black text-white">
+                              {lang === 'ar'
+                                ? `الملفات في قائمة الانتظار (${queuedFiles.length})`
+                                : `Queued Media Files (${queuedFiles.length})`}
+                            </h4>
+
+                            {busyFiles.length > 0 && (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-fuchsia-500/15 border border-fuchsia-500/30 text-fuchsia-300 text-[10px] font-bold">
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                                <span>
+                                  {compressingFile
+                                    ? lang === 'ar'
+                                      ? `جاري ضغط "${compressingFile.name}" (${compressingFile.compressionProgress}%)`
+                                      : `Compressing "${compressingFile.name}" (${compressingFile.compressionProgress}%)`
+                                    : lang === 'ar'
+                                    ? `جاري الفحص (${busyFiles.length})...`
+                                    : `Processing (${busyFiles.length})...`}
+                                </span>
+                              </span>
+                            )}
+
+                            {compressedCount > 0 && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold">
+                                <Gauge className="w-3 h-3" />
+                                <span>
+                                  {lang === 'ar'
+                                    ? `تم ضغط ${compressedCount} · توفير ${formatBytesMB(totalSavedBytes)}`
+                                    : `${compressedCount} compressed · Saved ${formatBytesMB(totalSavedBytes)}`}
+                                </span>
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            {busyFiles.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={handleSkipAllCompression}
+                                disabled={bulkPublishing}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 text-[11px] font-bold transition-colors cursor-pointer disabled:opacity-50"
+                              >
+                                <SkipForward className="w-3 h-3" />
+                                <span>{lang === 'ar' ? 'تخطي كل الضغط' : 'Skip All Compression'}</span>
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={handleClearBulkQueue}
+                              disabled={bulkPublishing}
+                              className="px-2.5 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 text-[11px] font-bold transition-colors cursor-pointer disabled:opacity-50"
                             >
-                              <div className="aspect-video rounded-lg overflow-hidden bg-black/60 mb-2 relative">
-                                {q.isVideo ? (
-                                  q.previewUrl && q.previewUrl.trim() !== '' ? (
-                                    <video src={q.previewUrl} className="w-full h-full object-cover" muted />
-                                  ) : (
-                                    <div className="w-full h-full flex items-center justify-center bg-black/60 text-xs text-neutral-500 font-mono">Video</div>
-                                  )
-                                ) : (
-                                  <img
-                                    src={q.previewUrl || DEFAULT_FALLBACK_IMAGE}
-                                    alt={q.name}
-                                    onError={(e) => {
-                                      (e.target as HTMLImageElement).src = DEFAULT_FALLBACK_IMAGE;
-                                    }}
-                                    className="w-full h-full object-cover"
-                                  />
-                                )}
-                                <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-black/80 backdrop-blur-md text-[8px] font-mono font-black text-cyan-300 border border-white/10">
-                                  {bulkOpt.deviceFormat === 'mobile' ? '📱 9:16' : '🖥️ 16:9'}
+                              {lang === 'ar' ? 'إفراغ القائمة' : 'Clear Queue'}
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Per-File Media Cards with Compression Status, Progress Bar & Controls */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                          {queuedFiles.map((q) => {
+                            const isBusy =
+                              q.compressionStatus === 'checking' ||
+                              q.compressionStatus === 'queued_compression' ||
+                              q.compressionStatus === 'compressing';
+                            const canSkip =
+                              q.compressionStatus === 'queued_compression' ||
+                              q.compressionStatus === 'compressing' ||
+                              q.compressionStatus === 'error';
+
+                            let statusBadgeText = '';
+                            let statusBadgeStyle = 'bg-neutral-800 text-neutral-300 border-white/10';
+                            let barFillClass = 'bg-cyan-400';
+
+                            if (q.uploadState === 'uploading') {
+                              statusBadgeText = lang === 'ar' ? 'جاري الرفع...' : 'Uploading...';
+                              statusBadgeStyle = 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40';
+                              barFillClass = 'bg-gradient-to-r from-cyan-400 to-blue-500';
+                            } else if (q.compressionStatus === 'checking') {
+                              statusBadgeText = lang === 'ar' ? 'فحص الحجم...' : 'Checking size...';
+                              statusBadgeStyle = 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30';
+                              barFillClass = 'bg-cyan-400 animate-pulse';
+                            } else if (q.compressionStatus === 'queued_compression') {
+                              statusBadgeText = lang === 'ar' ? 'في انتظار الضغط (>50MB)' : 'Queued (>50 MB)';
+                              statusBadgeStyle = 'bg-amber-500/15 text-amber-300 border-amber-500/30';
+                              barFillClass = 'bg-amber-400/60';
+                            } else if (q.compressionStatus === 'compressing') {
+                              statusBadgeText =
+                                lang === 'ar'
+                                  ? `جاري الضغط ${q.compressionProgress}%`
+                                  : `Compressing ${q.compressionProgress}%`;
+                              statusBadgeStyle = 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/40';
+                              barFillClass = 'bg-gradient-to-r from-fuchsia-500 via-purple-500 to-cyan-400';
+                            } else if (q.compressionStatus === 'compressed') {
+                              statusBadgeText = lang === 'ar' ? 'تم الضغط · جاهز' : 'Compressed · Ready';
+                              statusBadgeStyle = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
+                              barFillClass = 'bg-emerald-400';
+                            } else if (q.compressionStatus === 'skipped') {
+                              statusBadgeText = lang === 'ar' ? 'تم التخطي · جاهز' : 'Skipped · Ready';
+                              statusBadgeStyle = 'bg-amber-500/15 text-amber-300 border-amber-500/30';
+                              barFillClass = 'bg-amber-400';
+                            } else if (q.compressionStatus === 'error') {
+                              statusBadgeText = lang === 'ar' ? 'فشل الضغط' : 'Compression Failed';
+                              statusBadgeStyle = 'bg-red-500/20 text-red-300 border-red-500/40';
+                              barFillClass = 'bg-red-500';
+                            } else {
+                              statusBadgeText = lang === 'ar' ? 'جاهز للرفع (≤50MB)' : 'Ready (≤ 50 MB)';
+                              statusBadgeStyle = 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
+                              barFillClass = 'bg-emerald-400';
+                            }
+
+                            return (
+                              <div
+                                key={q.id}
+                                className="p-3 rounded-2xl bg-[#14151E] border border-[#242738] hover:border-cyan-500/30 transition-all flex flex-col justify-between gap-2.5 relative group"
+                              >
+                                <div>
+                                  <div className="aspect-video rounded-xl overflow-hidden bg-black/60 mb-2.5 relative border border-white/5">
+                                    {q.isVideo ? (
+                                      q.posterUrl ? (
+                                        <img
+                                          src={q.posterUrl}
+                                          alt={q.name}
+                                          className="w-full h-full object-cover"
+                                        />
+                                      ) : q.previewUrl && q.previewUrl.trim() !== '' ? (
+                                        <video src={q.previewUrl} className="w-full h-full object-cover" muted />
+                                      ) : (
+                                        <div className="w-full h-full flex items-center justify-center bg-black/60 text-xs text-neutral-500 font-mono">
+                                          Video
+                                        </div>
+                                      )
+                                    ) : (
+                                      <img
+                                        src={q.previewUrl || DEFAULT_FALLBACK_IMAGE}
+                                        alt={q.name}
+                                        onError={(e) => {
+                                          (e.target as HTMLImageElement).src = DEFAULT_FALLBACK_IMAGE;
+                                        }}
+                                        className="w-full h-full object-cover"
+                                      />
+                                    )}
+
+                                    <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/80 backdrop-blur-md text-[9px] font-mono font-black text-cyan-300 border border-white/10">
+                                      {bulkOpt.deviceFormat === 'mobile' ? '📱 9:16' : '🖥️ 16:9'}
+                                    </div>
+
+                                    {q.isVideo && (
+                                      <div className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded bg-rose-500/85 backdrop-blur-md text-[9px] font-bold text-white">
+                                        LIVE
+                                      </div>
+                                    )}
+
+                                    <div className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/80 text-[9px] font-bold text-neutral-300">
+                                      {bulkOpt.category}
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <div className="text-xs font-bold text-white truncate" title={q.name}>
+                                        {q.name}
+                                      </div>
+                                      <div className="text-[10px] text-neutral-400 font-mono mt-0.5 truncate">
+                                        {q.compressionNote || q.size}
+                                      </div>
+                                    </div>
+
+                                    <span
+                                      className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[9px] font-bold ${statusBadgeStyle}`}
+                                    >
+                                      {(isBusy || q.uploadState === 'uploading') && (
+                                        <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                                      )}
+                                      {q.compressionStatus === 'compressed' || q.compressionStatus === 'ready' ? (
+                                        <CheckCircle2 className="w-2.5 h-2.5" />
+                                      ) : null}
+                                      {q.compressionStatus === 'error' && (
+                                        <AlertTriangle className="w-2.5 h-2.5" />
+                                      )}
+                                      <span>{statusBadgeText}</span>
+                                    </span>
+                                  </div>
+
+                                  {q.compressionError && (
+                                    <div className="mt-1.5 p-2 rounded-lg bg-red-950/40 border border-red-500/30 text-[10px] text-red-300 leading-snug">
+                                      {q.compressionError}
+                                    </div>
+                                  )}
                                 </div>
-                                <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/80 text-[8px] font-bold text-neutral-300">
-                                  {bulkOpt.category}
+
+                                {/* Per-file Progress Bar & Skip / Cancel Actions */}
+                                <div className="space-y-2 pt-1">
+                                  <div className="w-full h-1.5 rounded-full bg-[#090A0E] overflow-hidden border border-white/5">
+                                    <div
+                                      className={`h-full rounded-full transition-all duration-200 ${barFillClass}`}
+                                      style={{
+                                        width: `${
+                                          q.compressionStatus === 'checking'
+                                            ? 20
+                                            : q.compressionStatus === 'queued_compression'
+                                            ? 8
+                                            : q.compressionProgress
+                                        }%`,
+                                      }}
+                                    />
+                                  </div>
+
+                                  <div className="flex items-center justify-between gap-1.5">
+                                    <div className="flex items-center gap-1.5">
+                                      {canSkip && !bulkPublishing && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleSkipCompressionForItem(q.id)}
+                                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 text-[10px] font-bold transition-colors cursor-pointer"
+                                          title={lang === 'ar' ? 'تخطي الضغط ورفع الملف كما هو' : 'Skip compression & keep original file'}
+                                        >
+                                          <SkipForward className="w-3 h-3" />
+                                          <span>{lang === 'ar' ? 'تخطي الضغط' : 'Skip'}</span>
+                                        </button>
+                                      )}
+
+                                      {q.compressionStatus === 'error' && !bulkPublishing && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleRetryCompressionForItem(q.id)}
+                                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/30 text-cyan-300 text-[10px] font-bold transition-colors cursor-pointer"
+                                        >
+                                          <RefreshCw className="w-3 h-3" />
+                                          <span>{lang === 'ar' ? 'إعادة' : 'Retry'}</span>
+                                        </button>
+                                      )}
+                                    </div>
+
+                                    {!bulkPublishing && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleCancelQueuedItem(q.id)}
+                                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[#1D1F2D] hover:bg-red-500/20 border border-white/10 hover:border-red-500/30 text-neutral-400 hover:text-red-300 text-[10px] font-bold transition-colors cursor-pointer ml-auto"
+                                      >
+                                        <X className="w-3 h-3" />
+                                        <span>{isBusy ? (lang === 'ar' ? 'إلغاء' : 'Cancel') : (lang === 'ar' ? 'إزالة' : 'Remove')}</span>
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
-                              <div className="text-[11px] font-bold text-white truncate">{q.name}</div>
-                              <div className="text-[9px] text-neutral-500 font-mono">{q.size}</div>
-                            </div>
-                          );
-                        })}
-                      </div>
+                            );
+                          })}
+                        </div>
 
-                      {(() => {
-                        const bulkOpt = TARGET_PLACEMENT_OPTIONS.find((o) => o.key === bulkDefaultPlacement) || TARGET_PLACEMENT_OPTIONS[0];
-                        return (
-                          <button
-                            type="button"
-                            onClick={handlePublishBulkBatch}
-                            disabled={bulkPublishing}
-                            className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-cyan-500 via-blue-600 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-black font-black text-xs cursor-pointer shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 disabled:opacity-60"
-                          >
-                            {bulkPublishing ? (
-                              <>
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                                <span>
-                                  {lang === 'ar'
-                                    ? `جاري رفع ونشر ${queuedFiles.length} خلفيات...`
-                                    : `Publishing & Syncing ${queuedFiles.length} Wallpapers...`}
-                                </span>
-                              </>
-                            ) : (
-                              <>
-                                <Check className="w-4 h-4 stroke-[3]" />
-                                <span>
-                                  {lang === 'ar'
-                                    ? `نشر ${queuedFiles.length} خلفيات دفعة واحدة إلى قسم: ${bulkOpt.labelAr}`
-                                    : `Publish All ${queuedFiles.length} Wallpapers to "${bulkOpt.labelEn}"`}
-                                </span>
-                              </>
-                            )}
-                          </button>
-                        );
-                      })()}
-                    </div>
-                  )}
+                        <button
+                          type="button"
+                          onClick={handlePublishBulkBatch}
+                          disabled={bulkPublishing || busyFiles.length > 0 || readyCount === 0}
+                          className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-cyan-500 via-blue-600 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-black font-black text-xs cursor-pointer shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {bulkPublishing ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <span>
+                                {bulkUploadProgress
+                                  ? lang === 'ar'
+                                    ? `جاري رفع (${bulkUploadProgress.current} / ${bulkUploadProgress.total}): ${bulkUploadProgress.currentName}...`
+                                    : `Uploading (${bulkUploadProgress.current} / ${bulkUploadProgress.total}): ${bulkUploadProgress.currentName}...`
+                                  : lang === 'ar'
+                                  ? `جاري رفع ونشر ${readyCount} خلفيات...`
+                                  : `Publishing & Syncing ${readyCount} Wallpapers...`}
+                              </span>
+                            </>
+                          ) : busyFiles.length > 0 ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <span>
+                                {lang === 'ar'
+                                  ? `جاري فحص وضغط ${busyFiles.length} ملف(ات) — انتظر أو تخطَّ الضغط للمتابعة`
+                                  : `Compressing ${busyFiles.length} animated video(s) — wait or Skip to continue`}
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <Check className="w-4 h-4 stroke-[3]" />
+                              <span>
+                                {lang === 'ar'
+                                  ? `نشر ${readyCount} خلفيات دفعة واحدة إلى قسم: ${bulkOpt.labelAr}`
+                                  : `Publish ${readyCount} Ready Wallpaper(s) to "${bulkOpt.labelEn}"`}
+                              </span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 

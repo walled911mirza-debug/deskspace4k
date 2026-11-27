@@ -28,6 +28,7 @@ export interface SupabaseWallpaperRow {
   title: { en?: string; ar?: string } | string | null;
   title_ar?: string | null;
   file_url?: string | null;
+  image_url?: string | null;
   url?: string | null;
   preview_url?: string | null;
   full_url?: string | null;
@@ -184,16 +185,20 @@ export function mapRowToWallpaper(row: Record<string, any> | null | undefined): 
     typeof row.full_url === 'string' && row.full_url.trim() ? row.full_url.trim() : '';
   const rawPreviewUrl =
     typeof row.preview_url === 'string' && row.preview_url.trim() ? row.preview_url.trim() : '';
+  const rawImageUrl =
+    typeof row.image_url === 'string' && row.image_url.trim() ? row.image_url.trim() : undefined;
   const rawFileUrl =
     typeof row.file_url === 'string' && row.file_url.trim()
       ? row.file_url.trim()
-      : typeof row.url === 'string' && row.url.trim()
-      ? row.url.trim()
-      : '';
+      : rawImageUrl || (typeof row.url === 'string' && row.url.trim() ? row.url.trim() : '');
   const rawVideoUrl =
     typeof row.video_url === 'string' && row.video_url.trim() ? row.video_url.trim() : undefined;
   const rawPosterUrl =
-    typeof row.poster_url === 'string' && row.poster_url.trim() ? row.poster_url.trim() : undefined;
+    typeof row.poster_url === 'string' && row.poster_url.trim()
+      ? row.poster_url.trim()
+      : rawImageUrl && !isVideoUrl(rawImageUrl)
+      ? rawImageUrl
+      : undefined;
   const rawThumbUrl =
     typeof row.thumbnail_url === 'string' && row.thumbnail_url.trim()
       ? row.thumbnail_url.trim()
@@ -311,6 +316,14 @@ export function mapWallpaperToRow(wp: Wallpaper): SupabaseWallpaperRow {
   const resolvedPreviewUrl =
     wp.previewUrl?.trim() || wp.thumbnailUrl?.trim() || wp.posterUrl?.trim() || resolvedFullUrl || '';
 
+  const resolvedImageUrl =
+    (!isVideoUrl(resolvedPreviewUrl) ? resolvedPreviewUrl : '') ||
+    wp.posterUrl?.trim() ||
+    wp.thumbnailUrl?.trim() ||
+    resolvedPreviewUrl ||
+    resolvedFullUrl ||
+    '';
+
   return {
     id: wp.id,
     slug: safeSlug,
@@ -320,6 +333,7 @@ export function mapWallpaperToRow(wp: Wallpaper): SupabaseWallpaperRow {
     },
     title_ar: wp.title?.ar || wp.title?.en || 'خلفية 4K',
     file_url: resolvedFullUrl || resolvedPreviewUrl,
+    image_url: resolvedImageUrl || resolvedFullUrl || resolvedPreviewUrl,
     preview_url: resolvedPreviewUrl || null,
     full_url: resolvedFullUrl || null,
     description: safeDesc,
@@ -352,6 +366,7 @@ function buildCoreRowFallback(row: SupabaseWallpaperRow): Record<string, any> {
     title: row.title,
     title_ar: row.title_ar,
     file_url: row.file_url,
+    image_url: row.image_url,
     preview_url: row.preview_url,
     full_url: row.full_url,
     description: row.description,
@@ -379,7 +394,7 @@ async function upsertRowResilient(row: SupabaseWallpaperRow): Promise<{ data: an
   }
 
   let payload: Record<string, any> = { ...row };
-  const maxRetries = 12;
+  const maxRetries = 24;
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     const { data, error } = await supabase
@@ -1131,7 +1146,7 @@ async function upsertBatchResilient(rows: SupabaseWallpaperRow[]): Promise<{ dat
   }
 
   let payloads: Record<string, any>[] = rows.map((r) => ({ ...r }));
-  const maxRetries = 12;
+  const maxRetries = 24;
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     const { data, error } = await supabase
