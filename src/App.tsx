@@ -55,6 +55,7 @@ import {
   restoreGalleryScroll,
 } from './utils/navigationState';
 import { DEFAULT_FALLBACK_IMAGE } from './utils/mediaUtils';
+import { SEOManager } from './utils/seo';
 import {
   fetchWallpapersFromSupabase,
   syncWallpaperStats,
@@ -272,17 +273,18 @@ export default function App() {
     document.documentElement.lang = lang;
     document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
 
+    // When viewing an individual wallpaper page, WallpaperDetailsPage owns meta tags & JSON-LD via useWallpaperSEO
+    if (activeWallpaperId) {
+      if (activeWallpaper) {
+        SEOManager.updateWallpaperSEO(activeWallpaper, lang);
+      }
+      return;
+    }
+
     let pageTitle = '';
     let pageDesc = '';
 
-    if (activeWallpaper) {
-      const wpTitle = activeWallpaper.title?.[lang] || activeWallpaper.title?.en || activeWallpaper.title?.ar || '4K Wallpaper';
-      pageTitle = `${wpTitle} - 4K Ultra HD Wallpaper · DeskSpace4K`;
-      pageDesc =
-        lang === 'ar'
-          ? `حمل خلفية ${wpTitle} بدقة 4K فائقة الوضوح (3840×2160) مجاناً لشاشتك على DeskSpace4K.`
-          : `Download ${wpTitle} in 4K Ultra HD resolution (3840×2160) for PC, Mac, and mobile on DeskSpace4K.`;
-    } else if (selectedCategory === 'Blog' || location.pathname === '/blog') {
+    if (selectedCategory === 'Blog' || location.pathname === '/blog') {
       pageTitle =
         lang === 'ar'
           ? 'المدونة التقنية · هندسة شاشات 4K و OLED · DeskSpace4K'
@@ -314,16 +316,14 @@ export default function App() {
     }
 
     document.title = pageTitle;
-
-    const metaDesc = document.querySelector('meta[name="description"]');
-    if (metaDesc) metaDesc.setAttribute('content', pageDesc);
-
-    const ogTitle = document.querySelector('meta[property="og:title"]');
-    if (ogTitle) ogTitle.setAttribute('content', pageTitle);
-
-    const ogDesc = document.querySelector('meta[property="og:description"]');
-    if (ogDesc) ogDesc.setAttribute('content', pageDesc);
-  }, [lang, selectedCategory, activeWallpaper, location.pathname]);
+    SEOManager.clearWallpaperSEO(lang);
+    SEOManager.upsertMetaTag('name', 'description', pageDesc);
+    SEOManager.upsertMetaTag('property', 'og:title', pageTitle);
+    SEOManager.upsertMetaTag('property', 'og:description', pageDesc);
+    SEOManager.upsertMetaTag('name', 'twitter:title', pageTitle);
+    SEOManager.upsertMetaTag('name', 'twitter:description', pageDesc);
+    SEOManager.upsertLinkTag('canonical', SEOManager.getCanonicalUrl());
+  }, [lang, selectedCategory, activeWallpaperId, activeWallpaper, location.pathname]);
 
   // Sync User to LocalStorage
   useEffect(() => {

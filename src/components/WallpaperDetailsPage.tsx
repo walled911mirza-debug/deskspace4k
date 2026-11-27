@@ -53,6 +53,7 @@ import {
 import { safeResolveMediaUrl, getDarkNeonPlaceholder } from '../utils/safeBlobLoader';
 import { cleanWallpaperTitle, extractResolutionFromTitle } from '../utils/titleSanitizer';
 import { matchesIdOrSlug } from '../utils/storageManager';
+import { useWallpaperSEO } from '../utils/seo';
 import { fetchWallpaperByIdOrSlug } from '../lib/wallpapersService';
 import { AdSenseUnit } from './AdSenseUnit';
 
@@ -348,6 +349,7 @@ const WallpaperDetailsPageComponent: React.FC<WallpaperDetailsPageProps> = ({
 
   // Derived properties from resolved active wallpaper
   const wallpaper = activeWallpaper;
+  useWallpaperSEO(wallpaper, lang);
   const rawTitle = wallpaper ? wallpaper.title?.[lang] || wallpaper.title?.en || wallpaper.title?.ar || '4K Wallpaper' : '';
   const currentTitle = useMemo(() => cleanWallpaperTitle(rawTitle), [rawTitle]);
 
